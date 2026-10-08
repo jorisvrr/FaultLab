@@ -123,12 +123,12 @@ Not part of the first visual release. This direction is kept so the token struct
 | Not started | Outline disc, 40% opacity | none | neutral | "idle" |
 | Running / healthy | Solid metal disc, tick ring | ticks respond to handled events | neutral | "running" |
 | Timer pending | Arc on the ring shrinking toward fire time | linear in virtual time | neutral | timer tag on hover |
-| Delayed link (CP2) | Dashed link; signals elongate | slower signals (true latency) | neutral | latency value |
+| Delayed link (CP1) | Dashed link; signals elongate | slower signals (true latency) | neutral | latency value |
 | Crashed (CP1) | Hollow disc, ring removed, ✕ mark | ring collapses once | ember | "crashed" |
 | Recovering (CP1) | Ring redraws progressively | — | neutral | "recovering" |
-| Partitioned (CP2) | Link broken with a visible gap and end caps; far side defocused relative to selection | — | ember gap caps | "partitioned" |
-| Message dropped (CP2) | Signal stops and disperses into dots; persistent marker on timeline | short dispersal | ember | "dropped: reason" |
-| Invariant violated (CP3) | Full-height timeline marker; run halts; banner | none | ember | violation name and detail |
+| Partitioned (CP1) | Link broken with a visible gap and end caps; far side defocused relative to selection | — | ember gap caps | "partitioned" |
+| Message dropped (CP1) | Signal stops and disperses into dots; persistent marker on timeline | short dispersal | ember | "dropped: reason" |
+| Invariant violated (CP2) | Full-height timeline marker; run halts; banner | none | ember | violation name and detail |
 | Protocol error (CP0 ✅) | Node ✕ mark; error panel with mono message | none | ember | `ErrorName: message` |
 
 ## 6. Typography
@@ -205,7 +205,7 @@ Implementation: CSS `cursor: url(cursor.svg) x y, auto` (rendered by the OS: zer
 |---|---|---|---|
 | **SVG (React-rendered)** | Crisp, styleable, inspectable, focusable, accessible; trivial hit-testing | DOM cost grows with element count; per-frame updates of hundreds of signals get expensive | **Phase 1 graph** (≤ ~50 nodes, a few hundred signals). Prove the visual language cheaply |
 | **Canvas 2D** | Thousands of moving signals at 60 fps; full control | Manual hit-testing; needs a parallel DOM/ARIA layer for accessibility; re-implement text layout | **Signal layer** once profiling shows SVG exceeding the frame budget. Nodes can stay SVG/DOM for focus and a11y |
-| **WebGL (Pixi / raw)** | Massive scale, shader effects (glow, grain) | Complexity, a11y mirror needed, context loss handling | Only if Canvas 2D is measured insufficient (CP10) |
+| **WebGL (Pixi / raw)** | Massive scale, shader effects (glow, grain) | Complexity, a11y mirror needed, context loss handling | Only if Canvas 2D is measured insufficient (CP9) |
 | **Three.js / React Three Fiber** | True 3D, sculptural materials like R8–R10 | Heavy bundle, camera/a11y complexity, temptation to decorate | **Not for the core instrument.** Possibly a landing-page hero or optional "sculpture view" after V5, if measured and maintainable |
 | **DOM + CSS** | Best for panels, tables, text, controls | Not for the graph | All chrome; virtualised trace table |
 
@@ -239,11 +239,12 @@ Implementation: CSS `cursor: url(cursor.svg) x y, auto` (rendered by the OS: zer
 | Causal highlight | `cause` graph | CP0 ✅ |
 | Activity matrix | Entries bucketed by node × time | CP0 ✅ |
 | Protocol error panel | `protocol.error` | CP0 ✅ |
-| Fault editor / crash controls | `FaultPlan` | CP1–CP2 |
-| Partition view, drop markers | `message.drop`, partition entries | CP2 |
-| Invariant panel | violation entries | CP3 |
-| Deep time travel (beyond streamed trace) | Snapshots | CP4 |
-| Protocol overlays (Raft role/term) | Protocol `describe(state)` view adapter | CP5 |
+| Fault editor / crash controls | Fault plan in the config; `node.crash`, `node.recover`, `fault.skipped` entries | Engine data: CP1 ✅ |
+| Partition view, drop markers, degraded links | `network.partition` / `network.heal`, `link.fault` / `link.restore`, `message.drop` (`reason`, `conditionIndex`) | Engine data: CP1 ✅ |
+| Node lifecycle and storage inspector | `incarnation` on node entries, `storage.write` | Engine data: CP1 ✅ |
+| Invariant panel | violation entries | CP2 |
+| Deep time travel (beyond streamed trace) | Snapshots | CP3 |
+| Protocol overlays (Raft role/term) | Protocol `describe(state)` view adapter | CP4 |
 
 Accessibility baseline for all of them: full keyboard operation (Space play/pause, ←/→ step, Shift ×10, `[`/`]` previous/next event of the selected node); visible focus rings in `--text-1`; a live region announcing stop reasons and violations; the graph always has a textual equivalent (node list + trace table).
 
@@ -251,12 +252,12 @@ Accessibility baseline for all of them: full keyboard operation (Space play/paus
 
 | Phase | After | Scope | Acceptance |
 |---|---|---|---|
-| **V0 Foundations** | CP6 | Tokens as CSS custom properties (both themes defined, dark shipped), type scale, spacing, radii, matte panel, pill button, metal disc button, focus styles | Contrast ratios re-verified in-browser; Storybook-free gallery page |
+| **V0 Foundations** | CP5 | Tokens as CSS custom properties (both themes defined, dark shipped), type scale, spacing, radii, matte panel, pill button, metal disc button, focus styles | Contrast ratios re-verified in-browser; Storybook-free gallery page |
 | **V1 Precision tools** | V0 | Trace table (virtualised), inspector with JSON viewer, transport, clock readout, stop banner | Keyboard-only walkthrough; 100k-entry trace scrolls at 60 fps |
 | **V2 Graph (SVG)** | V1 | Circle layout, node glyphs, links, linear signals from the playback clock, selection, causal highlight | Rendering is a pure function of (trace, position): a test renders twice at the same position and compares the DOM. Frame budget measured |
 | **V3 Time** | V2 | Time rail, activity matrix, space-time diagram, run signature glyph | Scrubbing never triggers engine calls; glyph identical for identical runs |
 | **V4 Atmosphere** | V3 | Glass (constrained), grain layer, cursor, panel springs, staggered reveals; reduced-motion/transparency variants | Lighthouse a11y ≥ 95; no regression in V2 frame budget; reduced-motion audit |
-| **V5 Scale** | CP10 | Canvas signal layer, LOD, bundling | 100 nodes / 10⁴ signals within budget |
+| **V5 Scale** | CP9 | Canvas signal layer, LOD, bundling | 100 nodes / 10⁴ signals within budget |
 | **V6 Light environment** (future enhancement) | V4 | Art-directed light theme (§5.3) | Side-by-side review; contrast verified |
 | **V7 Optional 3D** | V6 | Landing hero or sculpture view, only if measured and maintainable | Lazy-loaded; zero cost to the instrument |
 

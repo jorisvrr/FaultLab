@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: CP0. This document describes what exists **and** the planned shape, and marks which is which.
+> Status: CP1. This document describes what exists **and** the planned shape, and marks which is which.
 
 ## 1. Goals that shape the architecture
 
@@ -13,31 +13,34 @@
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ apps/web  (CP6+)   React + Vite                                           │
+│ apps/web  (CP5+)   React + Vite                                           │
 │   UI state: selection, panels, playback position, theme, layout          │
 │   Renderers: graph, timeline, trace table, inspector                      │
 │        ▲ trace chunks, run status            │ commands (run, step, …)    │
 │        │ (structured-clone messages,         ▼  validated at boundary)    │
 │ ┌──────┴──────────────────────────────────────────────────────────────┐  │
-│ │ Web Worker (CP6+): owns one Simulation; streams trace entries      │  │
+│ │ Web Worker (CP5+): owns one Simulation; streams trace entries      │  │
 │ └──────┬──────────────────────────────────────────────────────────────┘  │
 └────────┼──────────────────────────────────────────────────────────────────┘
          │ plain function calls
 ┌────────▼──────────────────────────────────────────────────────────────────┐
-│ packages/engine  (CP0 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
+│ packages/engine  (CP1 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
 │                                                                           │
 │   Simulation ──► EventScheduler ──► BinaryHeap        VirtualClock        │
-│      │   │            (time, seq) total order                             │
-│      │   └──► VirtualNetwork ──► RandomSource (stream "network")          │
-│      ├──► NodeRuntime × N ──► Protocol handlers (RandomSource "node:<id>")│
+│      │   │       (time, seq) order; compaction                            │
+│      │   └──► VirtualNetwork: latency, partitions, directed link faults   │
+│      │              └──► RandomSource (stream "network")                  │
+│      ├──► NodeRuntime × N: lifecycle, incarnation, timers, storage        │
+│      │      └──► NodeContext (buffered effects + storage) ──► Protocol    │
+│      ├──► Fault plan (data, scheduled up front) ──► fault dispatch        │
 │      ├──► EventTrace (append-only, frozen entries, causal links)          │
-│      └──► resolveConfig (trust boundary)   toFrozenJson (trust boundary)  │
+│      └──► resolveConfig / resolveFaults / toFrozenJson (trust boundaries) │
 │                                                                           │
-│   later: FaultPlan (CP1–2) · InvariantChecker (CP3) · Snapshot (CP4)      │
+│   later: InvariantChecker (CP2) · Snapshot (CP3)                          │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Simulation state** (lives only in the engine, determines outcomes): scheduler queue and sequence counter, virtual clock, PRNG states, node states/timers/counters, trace.
+**Simulation state** (lives only in the engine, determines outcomes): scheduler queue and sequence counter, virtual clock, PRNG states, network conditions (partition, link faults), node runtimes (status, incarnation, timers, volatile state, persistent storage, id counters), trace.
 
 **UI state** (lives only in the app, never influences outcomes): selection, panel layout, playback position and speed, theme, animation progress, camera.
 
@@ -49,18 +52,20 @@ The brief proposed eleven candidate modules. They are **files with clear respons
 
 | Candidate module | Where it lives | Status |
 |---|---|---|
-| simulation-core | `simulation.ts` — main loop, dispatch, handler contexts, effect application | CP0 ✅ |
-| event-scheduler | `scheduler.ts` (ordering, cancellation) on `priority-queue.ts` (binary heap) | CP0 ✅ |
+| simulation-core | `simulation.ts` — main loop, event and fault dispatch, commit of storage and effects | CP0 ✅, CP1 ✅ |
+| event-scheduler | `scheduler.ts` (ordering, cancellation, compaction) on `priority-queue.ts` (binary heap, Floyd heapify) | CP0 ✅, CP1 ✅ |
 | virtual-clock | `time.ts` — `VirtualTime`, `VirtualClock` (owned by the scheduler) | CP0 ✅ |
 | seeded-random | `random.ts` — xoshiro128\*\*, SplitMix32 seeding, named streams | CP0 ✅ |
-| virtual-network | `network.ts` — latency model; drops/partitions in CP2 | CP0 (latency only) |
-| node-runtime | `NodeRuntime` inside `simulation.ts`; extracted when crash/recovery lands | CP0 (start only), CP1 |
-| protocol-api | `protocol.ts` — `Protocol`, `NodeContext`, message/timer types | CP0 ✅ |
-| fault-injection | `faults.ts` — scheduled `FaultPlan` as data | CP1–CP2 |
+| virtual-network | `network.ts` — base latency, partitions (checked at send and delivery), directed link loss/delay | CP0 ✅, CP1 ✅ |
+| node-runtime | `node.ts` — `NodeRuntime`: lifecycle, incarnation, timers, volatile state, persistent storage | CP1 ✅ |
+| protocol-api | `protocol.ts` (types incl. `NodeStorage`) and `context.ts` (per-handler context, effect buffer, storage overlay) | CP0 ✅, CP1 ✅ |
+| fault-injection | `faults.ts` — fault plan types, validation and normalisation; applied by `simulation.ts` | CP1 ✅ |
 | event-trace | `trace.ts` — entry types, append-only `EventTrace`, canonical serialisation | CP0 ✅ |
-| invariant-checker | `invariants.ts` — predicates over global state after each step | CP3 |
-| test-fixtures | `fixtures/` — `createPingProtocol`, `echoForever` (exported as `@faultlab/engine/fixtures`) | CP0 ✅ |
-| *(added)* trust boundaries | `config.ts` (config validation), `json.ts` (payload/state validation + freezing) | CP0 ✅ |
+| invariant-checker | `invariants.ts` — predicates over global state after each step | CP2 |
+| test-fixtures | `fixtures/` — `createPingProtocol`, `echoForever`, `createHeartbeatProtocol` (exported as `@faultlab/engine/fixtures`) | CP0 ✅, CP1 ✅ |
+| *(added)* trust boundaries | `config.ts`, `faults.ts`, `validation.ts` (config/fault validation), `json.ts` (payload/state validation + freezing) | CP0 ✅, CP1 ✅ |
+
+**Separation of concerns in CP1.** Protocols cannot inject faults: there is no API for it. Faults enter only through the configuration. The network knows partitions and link conditions but not node lifecycles. `NodeRuntime` knows lifecycles but not the network. The trace records both, and the future UI reads only the trace.
 
 ## 4. Data flow of one step
 
@@ -68,25 +73,31 @@ The brief proposed eleven candidate modules. They are **files with clear respons
 step():
   1. peek next live event          ── quiescent? event limit? time limit? → stop
   2. pop it; clock := event.time   ── clock is monotonic by construction
-  3. append trace entry for the event (node.start | message.deliver | timer.fire)
-  4. run the protocol handler with a fresh NodeContext
-       handler calls ctx.send / setTimer / cancelTimer → effects are BUFFERED
+  3. fault event?  → apply it (crash / recover / partition / heal / link / link-restore), one trace
+                     entry; a recovery then continues with step 5 for `init`
+     delivery?     → partition now separates the pair? → message.drop (in flight)
+                     receiver crashed?                  → message.drop (node-down)
+     timer?        → assert the node runs in the timer's incarnation
+  4. append the trace entry for the event (node.start | message.deliver | timer.fire | node.recover)
+  5. run the protocol handler with a fresh NodeContext
+       ctx.send / setTimer / cancelTimer / storage.set|delete → BUFFERED
        handler returns new state → validated + deep-frozen
        handler throws → protocol.error entry, nothing applied, run stops
-  5. apply buffered effects in call order:
-       send       → network.route() draws latency → message.send entry → schedule deliver
-       setTimer   → timer.set entry → schedule fire
-       cancelTimer→ cancel in scheduler → timer.cancel entry (only if it was pending)
-  6. if state changed (reference inequality) → state.update entry
-  7. pending events > maxPendingEvents? → stop
+  6. commit: storage.write entry (durable first)
+  7. apply buffered effects in call order:
+       send       → network.route(): partition? loss? latency → message.send (+ message.drop) → schedule deliver
+       setTimer   → timer.set entry → schedule fire (tagged with the incarnation)
+       cancelTimer→ cancel in scheduler (may compact) → timer.cancel entry (only if it was pending)
+  8. if state changed (reference inequality) → state.update entry
+  9. pending events > maxPendingEvents? → stop
 ```
 
 ## 5. Planned boundaries (not built yet)
 
-- **Worker protocol (CP6).** Versioned discriminated-union messages in both directions, validated on receipt. The worker streams trace entries in chunks; the UI keeps an index of them. The worker never receives UI state.
-- **Experiment format (CP8).** `{ formatVersion, engineVersion, protocol: {name, version}, config, faultPlan }`. Traces are *not* the shared artefact; inputs are. A trace is re-derived and its fingerprint compared with the stored one to detect engine/protocol drift.
-- **Protocol view adapters (CP5+).** A protocol may export a pure `describe(state) → { role, term, label }` used only by the UI, keeping visual concerns out of the engine and out of protocol logic.
-- **User-supplied protocols (CP11).** Requires its own security architecture ADR (sandboxing, resource limits, determinism guards). Not before.
+- **Worker protocol (CP5).** Versioned discriminated-union messages in both directions, validated on receipt. The worker streams trace entries in chunks; the UI keeps an index of them. The worker never receives UI state.
+- **Experiment format (CP7).** `{ formatVersion, engineVersion, protocol: {name, version}, config }`, where the config already contains the fault plan. Traces are *not* the shared artefact; inputs are. A trace is re-derived and its fingerprint compared with the stored one to detect engine/protocol drift.
+- **Protocol view adapters (CP4+).** A protocol may export a pure `describe(state) → { role, term, label }` used only by the UI, keeping visual concerns out of the engine and out of protocol logic.
+- **User-supplied protocols (CP10).** Requires its own security architecture ADR (sandboxing, resource limits, determinism guards). Not before.
 
 ## 6. Architecture decision records
 

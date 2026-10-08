@@ -11,3 +11,7 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0005](0005-protocol-api-immutable-state-buffered-effects.md) | Protocol API: immutable JSON state, buffered effects, expiring context | Accepted (CP0) |
 | [0006](0006-json-payloads-validate-copy-freeze.md) | Payloads and state are JSON, validated, copied and frozen | Accepted (CP0) |
 | [0007](0007-determinism-guards-without-eslint.md) | Determinism guards via tsconfig libs + fitness tests, no ESLint yet | Accepted (CP0) |
+| [0008](0008-node-lifecycle-persistence-incarnations.md) | Node lifecycle, `sync-on-commit` persistence, incarnations | Accepted (CP1) |
+| [0009](0009-fault-plan-as-input.md) | Faults are scheduled input data; fault-plan events precede same-tick protocol events | Accepted (CP1) |
+| [0010](0010-network-fault-semantics.md) | Directed link faults decided at send; partitions checked at send and delivery | Accepted (CP1) |
+| [0011](0011-scheduler-heap-compaction.md) | Heap compaction with Floyd heapify (amends 0003) | Accepted (CP1) |

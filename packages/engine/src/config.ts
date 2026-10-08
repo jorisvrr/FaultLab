@@ -1,8 +1,10 @@
 import { ConfigError } from './errors';
+import { resolveFaults, type Fault, type FaultSpec } from './faults';
 import type { JsonValue } from './json';
 import type { NetworkConfig } from './network';
 import type { NodeId, Protocol } from './protocol';
-import type { VirtualTime } from './time';
+import { MAX_DELAY, type VirtualTime } from './time';
+import { isIntIn, isRecord, rejectUnknownKeys } from './validation';
 
 export interface Limits {
   /** Maximum number of events to dispatch. Guarantees termination of every run. */
@@ -21,16 +23,19 @@ export interface SimulationConfig<S extends JsonValue = JsonValue, M extends Jso
   readonly protocol: Protocol<S, M>;
   readonly network: NetworkConfig;
   readonly limits?: Partial<Limits>;
+  /** Scheduled faults (ADR-0009). Part of the experiment's reproducible input. */
+  readonly faults?: readonly FaultSpec[];
 }
 
-export type ResolvedConfig<S extends JsonValue, M extends JsonValue> = Omit<SimulationConfig<S, M>, 'limits'> & {
+export type ResolvedConfig<S extends JsonValue, M extends JsonValue> = Omit<SimulationConfig<S, M>, 'limits' | 'faults'> & {
   readonly limits: Limits;
+  /** Validated, normalised fault plan with ids f1…fn. */
+  readonly faults: readonly Fault[];
 };
 
 export const DEFAULT_LIMITS: Limits = Object.freeze({ maxEvents: 100_000, maxTime: null, maxPendingEvents: 100_000 });
 export const MAX_NODES = 1024;
-/** Upper bound on any single latency or timer delay (~24.8 simulated days at 1 tick = 1 ms). */
-export const MAX_DELAY = 2 ** 31;
+/** Excludes ':' (used in message/timer ids) and '>' (used in link keys). */
 const NODE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /**
@@ -45,6 +50,7 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
 ): ResolvedConfig<S, M> {
   const input: unknown = config;
   if (!isRecord(input)) throw new ConfigError('config', 'must be an object');
+  rejectUnknownKeys(input, ['seed', 'nodes', 'protocol', 'network', 'limits', 'faults'], 'config');
 
   const seed = input['seed'];
   if (!Number.isInteger(seed) || (seed as number) < 0 || (seed as number) >= 2 ** 32) {
@@ -77,8 +83,10 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
 
   const network = input['network'];
   if (!isRecord(network)) throw new ConfigError('network', 'must be an object');
+  rejectUnknownKeys(network, ['latency'], 'network');
   const latency = network['latency'];
   if (!isRecord(latency)) throw new ConfigError('network.latency', 'must be an object');
+  rejectUnknownKeys(latency, ['min', 'max'], 'network.latency');
   const min = latency['min'];
   const max = latency['max'];
   if (!isIntIn(min, 0, MAX_DELAY)) throw new ConfigError('network.latency.min', `must be an integer in [0, ${MAX_DELAY}]`);
@@ -86,6 +94,7 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
 
   const limitsInput = input['limits'] ?? {};
   if (!isRecord(limitsInput)) throw new ConfigError('limits', 'must be an object');
+  rejectUnknownKeys(limitsInput, ['maxEvents', 'maxTime', 'maxPendingEvents'], 'limits');
   const limits: Limits = { ...DEFAULT_LIMITS, ...stripUndefined(limitsInput) } as Limits;
   if (!isIntIn(limits.maxEvents, 1, Number.MAX_SAFE_INTEGER)) throw new ConfigError('limits.maxEvents', 'must be a positive integer');
   if (!isIntIn(limits.maxPendingEvents, 1, Number.MAX_SAFE_INTEGER)) {
@@ -95,21 +104,20 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
     throw new ConfigError('limits.maxTime', 'must be null or a non-negative integer');
   }
 
+  const faults = resolveFaults(input['faults'], nodes as NodeId[]);
+  // Node starts and plan faults are all queued before the first step.
+  if (nodes.length + faults.length > limits.maxPendingEvents) {
+    throw new ConfigError('faults', 'nodes + faults exceed limits.maxPendingEvents before the run even starts');
+  }
+
   return Object.freeze({
     seed: seed as number,
     nodes: Object.freeze([...(nodes as NodeId[])]),
     protocol: config.protocol,
     network: Object.freeze({ latency: Object.freeze({ min, max }) }),
     limits: Object.freeze({ maxEvents: limits.maxEvents, maxTime: limits.maxTime, maxPendingEvents: limits.maxPendingEvents }),
+    faults,
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isIntIn(value: unknown, min: number, max: number): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max;
 }
 
 function stripUndefined(record: Record<string, unknown>): Record<string, unknown> {

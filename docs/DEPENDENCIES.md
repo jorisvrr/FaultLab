@@ -18,23 +18,23 @@ Rule: a dependency must solve a problem we actually have, better than ~100 lines
 
 | Package | Checkpoint | Purpose | Note |
 |---|---|---|---|
-| `vite`, `@vitejs/plugin-react` | CP6 | Dev server/bundler; first-class Web Worker support | |
-| `react`, `react-dom` | CP6 | UI composition | Engine never imports it (enforced) |
-| `@playwright/test` | CP6 | E2E and cross-browser determinism tests | |
-| `eslint`, `typescript-eslint` | CP6 | Linting once there is UI code with hooks/a11y rules | Engine guards are already covered by tsconfig + fitness tests |
-| A schema validator (`valibot` or `zod`) | CP8 | Validating imported experiment files/share links | Hand-written validation is fine for the small CP0 config. Re-evaluate when schemas grow. |
-| `idb` (≈1 KB) or raw IndexedDB | CP8 | Persistence | Decide by API ergonomics in a spike |
-| Rendering/motion libraries | CP7 | See [DESIGN_DIRECTION §10](DESIGN_DIRECTION.md) | Only after measured prototypes |
+| `vite`, `@vitejs/plugin-react` | CP5 | Dev server/bundler; first-class Web Worker support | |
+| `react`, `react-dom` | CP5 | UI composition | Engine never imports it (enforced) |
+| `@playwright/test` | CP5 | E2E and cross-browser determinism tests | |
+| `eslint`, `typescript-eslint` | CP5 | Linting once there is UI code with hooks/a11y rules | Engine guards are already covered by tsconfig + fitness tests |
+| A schema validator (`valibot` or `zod`) | CP7 | Validating imported experiment files/share links | Hand-written validation is fine for the small CP0 config. Re-evaluate when schemas grow. |
+| `idb` (≈1 KB) or raw IndexedDB | CP7 | Persistence | Decide by API ergonomics in a spike |
+| Rendering/motion libraries | CP6 | See [DESIGN_DIRECTION §10](DESIGN_DIRECTION.md) | Only after measured prototypes |
 
 ## Rejected
 
 | Package | Why not |
 |---|---|
 | `seedrandom` and other PRNG libraries | Our generator is ~40 lines, verified bit-exact against the C reference, and exposes its state for snapshots, which most libraries do not. |
-| `immer` | Would make protocol state updates terser, but hides the copy/freeze semantics we want students and reviewers to see. Reconsider for Raft ergonomics in CP5. |
+| `immer` | Would make protocol state updates terser, but hides the copy/freeze semantics we want students and reviewers to see. Reconsider for Raft ergonomics in CP4. |
 | `lodash`, `ramda` | Nothing needed. |
 | Any backend, auth, database | Out of scope by design: the first milestones run entirely in the browser. |
-| Rust/WASM toolchain | Not justified until profiling says so (CP10) or sandboxing requires it (CP11). |
+| Rust/WASM toolchain | Not justified until profiling says so (CP9) or sandboxing requires it (CP10). |
 
 ## License compatibility
 

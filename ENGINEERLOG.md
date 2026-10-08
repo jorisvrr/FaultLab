@@ -108,7 +108,7 @@ Eerst op virtuele tijd. Bij gelijke tijd wint het event dat het eerst is ingepla
 **4. Welke keuzes hebben we gemaakt?**
 - *Heap* in plaats van een gesorteerde array: invoegen kost dan O(log n) in plaats van O(n).
 - *FIFO bij gelijke tijd* (wie eerst ingepland is, gaat eerst). Alternatieven waren "eerst berichten, dan timers" (verstopt beleid in de scheduler) of willekeurig met een seed (interessant om bugs te vinden, maar lastiger uit te leggen). Die laatste staat op de roadmap als optie. Zie ADR-0003.
-- *Lazy cancellation:* een geannuleerde timer blijft in de heap staan en wordt overgeslagen zodra hij bovenaan komt. Annuleren kost zo O(1), maar dode entries kosten geheugen. Dat wordt in CP1 onderzocht.
+- *Lazy cancellation:* een geannuleerde timer blijft in de heap staan en wordt overgeslagen zodra hij bovenaan komt. Annuleren kost zo O(1), maar dode entries kosten geheugen. In CP1 bleek dat bij lange timers echt een probleem te zijn, en is het opgelost met compactie (zie CP1.5).
 
 **5. Welke problemen kwamen we tegen?**
 Een heap is **niet stabiel**: twee elementen die "gelijk" zijn, kunnen in willekeurige volgorde uit de heap komen. Sorteer je alleen op tijd, dan is de volgorde van gelijktijdige events dus níét gegarandeerd, terwijl kleine tests toevallig wel goed lijken te gaan. De oplossing is het unieke `seq`-nummer: twee verschillende events zijn daardoor nooit "gelijk". Zo'n vergelijking heet een *strikte totale orde*. Met een strikte totale orde bestaat er maar één mogelijke uitvoervolgorde, ongeacht stabiliteit.
@@ -285,3 +285,297 @@ Testen is meer dan "werkt het?". Het is bewijzen dat de code doet wat de specifi
 1. Wat is het verschil tussen een gewone unit test en een property-based test?
 2. Wat doe je als de golden fingerprint-test faalt?
 3. Waarom zegt 97% dekking minder dan de resultaten van de mutatietest?
+
+---
+
+## CP1 — Foutinjectie en de levenscyclus van nodes
+
+**Datum:** 2026-10-08 · **Status:** afgerond en goedgekeurd · **Engine-versie:** `0.2.0-cp1`
+
+In CP0 werkte alles altijd. In CP1 gaat het met opzet mis: nodes crashen en herstarten, het netwerk raakt in partities uiteen, berichten gaan verloren of komen te laat aan. Het doel is niet "chaos", maar **precies gedefinieerde, reproduceerbare chaos**. Elke fout is een geplande invoer, elke gevolg staat in de trace, en dezelfde invoer geeft nog steeds exact dezelfde trace.
+
+Ontwerp vooraf: ADR-0008 t/m ADR-0011 in `docs/adr/`, en de acceptatiecriteria in `docs/ROADMAP.md`.
+
+### CP1.1 — Crash, herstel en incarnaties
+
+**1. Wat hebben we gebouwd?**
+Nodes hebben nu een levenscyclus: `idle → running → crashed → running → …` (`node.ts`). Een crash en een herstel (*recovery*) zijn geplande gebeurtenissen. Bij elke herstart krijgt de node een nieuw **incarnatienummer**: 1 bij de eerste start, 2 na de eerste recovery, enzovoort.
+
+**2. Waarom hebben we dit nodig?**
+Gedistribueerde algoritmes zoals Raft bestaan juist om crashes te overleven. Een simulator zonder crashes kan dus niets interessants testen. Een crash is alleen een zinvol model van een echte computer als precies vastligt wat er verloren gaat en wat blijft.
+
+**3. Hoe werkt het?**
+Alles wat een node heeft, valt in één van vier categorieën:
+
+| Categorie | Voorbeeld | Bij crash |
+|---|---|---|
+| Vluchtige protocolstate | `state` (zoals RAM) | weg; `init` bouwt hem opnieuw op |
+| Persistente protocolstate | `ctx.storage` (zoals een schijf) | blijft |
+| Runtime-state van de node | status, incarnatie, lopende timers | status → crashed, alle timers geannuleerd |
+| Simulatie-infrastructuur | scheduler, klok, netwerk, random streams | onaangetast |
+
+Het lastigste probleem is de **oude timer**. Stel: een node zet om t=0 een timer voor t=100, crasht om t=50 en herstart om t=60. Die oude timer mag om t=100 níét afgaan in de nieuwe incarnatie: die "nieuwe" node heeft hem nooit gezet. FaultLab beschermt daar dubbel tegen:
+
+1. Een crash annuleert **meteen** alle lopende timers van de node (*eager cancellation*).
+2. Elke timer onthoudt de incarnatie die hem zette. Bij het afgaan controleert de engine dat die nog klopt (een *assertion*). Faalt die controle, dan is er een bug in de engine en stopt alles luid in plaats van stilletjes een verkeerde trace te maken.
+
+```ts
+// simulation.ts — tweede verdedigingslinie
+if (node.status !== 'running' || event.incarnation !== node.incarnation) {
+  throw new EngineInvariantError(`timer ... reached ${node.id} ...`);
+}
+```
+
+**4. Welke keuzes hebben we gemaakt?**
+- Het protocol krijgt het incarnatienummer **niet** te zien. Een echte computer krijgt ook geen "bootnummer" van het universum. Een protocol dat dat wil weten, slaat zelf een teller op in storage (de heartbeat-fixture doet precies dat).
+- De random stream van een node loopt na een crash **door**. Anders zou een herstarte node dezelfde "willekeurige" keuzes herhalen, en dat is onrealistisch.
+- Crashen van een al gecrashte node, of herstellen van een draaiende node, is geen fout: het wordt vastgelegd als `fault.skipped`. Daardoor is élk willekeurig gegenereerd faultplan geldig, en dat hebben de property tests nodig.
+
+**5. Welke problemen kwamen we tegen?**
+"Wat gebeurt er als een crash en een timer op hetzelfde tijdstip vallen?" Zonder expliciete regel is het antwoord toeval. De regel staat in CP1.3.
+
+**6. Hoe hebben we het getest?**
+✅ 27 tests in `lifecycle.test.ts`, waaronder: een gecrashte node voert niets meer uit; berichten naar hem worden gedropt met reden `node-down`; na recovery is de state vers maar de storage intact; en de randgevallen "crash + timer op dezelfde tick" en "crash + recovery + oude timer op dezelfde tick". ✅ Een mutatie die de eager cancellation weghaalt, laat 8 tests falen. Haal je óók de assertion weg, dan vangt het trace-orakel (CP1.6) het alsnog met 13 falende tests.
+
+**7. Wat heb ik hiervan geleerd?**
+"Crash" is geen feature maar een **definitie**: je moet per stukje data beslissen of het overleeft. Defence in depth (twee onafhankelijke beschermingen) maakt bugs luid in plaats van stil.
+
+**8. Belangrijkste begrippen**
+- **Crash-recovery-model:** nodes kunnen stoppen en later herstarten met hun persistente data.
+- **Incarnatie:** één "leven" van een node tussen twee crashes.
+- **Vluchtig vs. persistent:** verdwijnt bij een crash vs. blijft bewaard.
+- **Defence in depth:** meerdere onafhankelijke beveiligingen voor hetzelfde risico.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Welke vier categorieën state onderscheidt FaultLab, en wat doet een crash met elk ervan?
+2. Waarom kan een timer van een vorige incarnatie nooit afgaan? Noem beide mechanismen.
+3. Waarom krijgt het protocol het incarnatienummer niet te zien?
+
+### CP1.2 — Persistentie: wat overleeft een crash?
+
+**1. Wat hebben we gebouwd?**
+Persistente opslag per node: `ctx.storage.get / set / delete / keys` (`context.ts`, `protocol.ts`), met het persistentiemodel **sync-on-commit**.
+
+**2. Waarom hebben we dit nodig?**
+Raft móét bepaalde gegevens (de huidige *term*, op wie gestemd is) op schijf hebben voordat het antwoordt. Anders kan een node na een crash twee keer stemmen in dezelfde verkiezing, en dan kunnen er twee leiders ontstaan. Een simulator moet dit gedrag kunnen modelleren.
+
+**3. Hoe werkt het?**
+Schrijfacties worden, net als berichten, eerst **gebufferd**. Lezen binnen dezelfde handler ziet de eigen buffer (*read-your-writes*): eerst wordt in de buffer gekeken, dan in de opgeslagen data. Als de handler succesvol eindigt, worden alle schrijfacties tegelijk duurzaam en als één `storage.write` in de trace gezet, **vóór** de berichten van die stap (*persist-before-send*). Gooit de handler een fout, dan wordt er niets opgeslagen.
+
+Omdat een crash alleen *tussen* twee stappen kan vallen, nooit halverwege, geldt: een vastgelegde (*committed*) schrijfactie gaat nooit verloren, en een half uitgevoerde wordt nooit opgeslagen.
+
+**4. Welke keuzes hebben we gemaakt?**
+Een realistischer alternatief is een expliciete `sync()`: writes zijn pas veilig na een sync, en een crash daarvoor gooit ze weg. Echte bugs in databases ontstaan vaak juist daar. Dat hebben we bewust uitgesteld. De trace legt wel al `persistence: 'sync-on-commit'` vast, zodat een tweede model later zonder verwarring kan worden toegevoegd (ADR-0008).
+
+**5. Welke problemen kwamen we tegen?**
+In mijn eerste test voor "verwijderen overleeft een crash" maakte het protocol bij elke herstart de sleutel opnieuw aan en verwijderde hem daarna weer. De engine gaf dus terecht `{}` terug, en de test zat fout. Les: bij een falende test eerst de *test* wantrouwen, dan pas de code.
+
+**6. Hoe hebben we het getest?**
+✅ Read-your-writes, gesorteerde keys en delete. ✅ De volgorde `storage.write` vóór `message.send`. ✅ Niets opgeslagen bij een fout. ✅ Ongeldige keys en waarden worden geweigerd. ✅ Property test: de opslag na elke willekeurige reeks crashes is gelijk aan wat je uit de trace kunt afleiden, en `boots` = 1 + het aantal recoveries. ✅ Mutaties "crash wist de opslag" (5 tests falen) en "mislukte handler slaat toch op" (1 test faalt) worden gevangen.
+
+**7. Wat heb ik hiervan geleerd?**
+Persistentie is een **contract over tijd**: wát is wanneer veilig. Atomaire stappen maken dat contract eenvoudig en controleerbaar.
+
+**8. Belangrijkste begrippen**
+- **Durability (duurzaamheid):** data overleeft een crash.
+- **Commit:** het moment waarop wijzigingen definitief worden.
+- **Read-your-writes:** je ziet je eigen nog niet vastgelegde wijzigingen.
+- **fsync:** het besturingssysteem dwingen data echt naar de schijf te schrijven.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Wat betekent `sync-on-commit`, en waarom is het correct dat een crash nooit halverwege een handler valt?
+2. Waarom komt `storage.write` in de trace vóór de berichten van dezelfde stap, en welk Raft-probleem modelleert dat?
+3. Hoe ziet een handler zijn eigen nog niet opgeslagen writes (read-your-writes)?
+
+### CP1.3 — Het faultplan: fouten als reproduceerbare invoer
+
+**1. Wat hebben we gebouwd?**
+Een **faultplan** in de configuratie (`faults.ts`): een lijst als `{ at: 100, type: 'crash', node: 'n2' }`. Ondersteund worden `crash`, `recover`, `partition`, `heal`, `link` (verlies/vertraging op één richting) en `link-restore`.
+
+**2. Waarom hebben we dit nodig?**
+Een fout die op een willekeurig moment "van buitenaf" komt, maakt de simulatie onreproduceerbaar. Als fouten gewone invoerdata zijn, blijft de trace een pure functie van de configuratie, en kun je een gevonden bug altijd opnieuw afspelen.
+
+**3. Hoe werkt het?**
+Het plan wordt bij de grens streng gevalideerd (onbekende velden worden geweigerd, zodat een typfout als `nodes` in plaats van `node` niet stilletjes wordt genegeerd), krijgt ids `f1, f2, …`, en wordt in zijn geheel in `run.start` opgeslagen. Daarna worden alle faults als gewone events in de scheduler gezet, direct na de node-starts.
+
+Dat levert gratis een heldere regel op voor gelijktijdige events. Faults krijgen een laag volgnummer (`seq`), omdat ze vóór de run worden ingepland. Alles wat tijdens de run ontstaat (berichten, timers) krijgt een hoger nummer. Dus:
+
+> Op hetzelfde tijdstip gaan geplande faults altijd vóór berichten en timers, en onderling in de volgorde van het plan.
+
+**4. Welke keuzes hebben we gemaakt?**
+We hebben géén extra "prioriteitsklasse" aan de scheduler toegevoegd. De bestaande regel (tijd, seq) geeft het gewenste gedrag al. Faults die tijdens een run interactief worden toegevoegd (later, via de UI) zouden deze regel breken; dat is genoteerd voor wanneer die functie komt (ADR-0009).
+
+**5. Welke problemen kwamen we tegen?**
+Een plan met meer faults dan `maxPendingEvents` zou de run direct na de eerste stap stoppen. Dat wordt nu al bij de validatie afgewezen, met een duidelijke foutmelding.
+
+**6. Hoe hebben we het getest?**
+✅ 42 negatieve tests met ongeldige plannen en configvelden, elk met het exacte foutpad (zoals `faults[0].groups[1][0]`). ✅ Tests voor alle tijdstip-randgevallen. ✅ Property test: willekeurige faultplannen geven bij herhaling exact dezelfde trace.
+
+**7. Wat heb ik hiervan geleerd?**
+Door fouten als *data* te behandelen in plaats van als *gebeurtenissen van buitenaf*, erven ze automatisch alle determinisme-garanties van CP0.
+
+**8. Belangrijkste begrippen**
+- **Fault injection:** bewust fouten veroorzaken om robuustheid te testen.
+- **Idempotent:** twee keer uitvoeren heeft hetzelfde effect als één keer.
+- **Validatie aan de grens:** invoer controleren op de plek waar hij binnenkomt.
+
+### CP1.4 — Netwerkfouten en berichten onderweg
+
+**1. Wat hebben we gebouwd?**
+Het netwerk (`network.ts`) kent nu **partities** (groepen nodes die elkaar niet meer kunnen bereiken) en **linkfouten** per richting: kans op verlies, en extra vertraging.
+
+**2. Waarom hebben we dit nodig?**
+Partities zijn de klassieke oorzaak van *split brain*: twee helften van een cluster die elk denken de baas te zijn. Eenrichtingsverlies veroorzaakt notoir lastige bugs. Het belangrijkste deel van dit onderwerp is: wat gebeurt er met berichten die al **onderweg** zijn als een fout begint of eindigt?
+
+**3. Hoe werkt het?**
+Bij **verzenden** wordt het lot van een bericht één keer bepaald, in deze volgorde: (1) partitie tussen zender en ontvanger → gedropt; (2) verlies op deze link → misschien gedropt; (3) anders: aankomsttijd = basislatency + eventuele extra vertraging.
+Bij **aankomst** wordt opnieuw gecontroleerd: (1) is er nú een partitie → gedropt (`partitioned-in-flight`); (2) is de ontvanger gecrasht → gedropt (`node-down`).
+
+Een nieuwe partitie snijdt dus ook berichten af die al onderweg zijn, net als een doorgeknipte kabel. Een linkwijziging doet dat níét, want het bericht "zat al op de lijn" onder de oude condities.
+
+Elke drop heeft twee verwijzingen: `cause` (het bericht zelf: *waar kwam dit vandaan?*) en `conditionIndex` (de fout die het veroorzaakte: *waarom ging het mis?*). Zo kan de toekomstige UI precies uitleggen waarom een bericht verdween.
+
+**4. Welke keuzes hebben we gemaakt?**
+- Links zijn **gericht** (van → naar), omdat echte netwerkfouten vaak asymmetrisch zijn. Symmetrisch = twee faults.
+- Extra random getallen worden alleen getrokken als er een fout actief is. Een run zonder fouten trekt daardoor precies dezelfde getallen als in CP0.
+
+**5. Welke problemen kwamen we tegen?**
+De eerste A/B-meting liet zien dat CP1 merkbaar trager was, ook zónder fouten. Elk bericht bouwde een string-sleutel (`"n1>n2"`) en deed een map-lookup, ook als er geen enkele linkfout bestond. Een simpele check (`links.size === 0`) haalde het grootste deel van die kosten weg. Zie CP1.6 voor de cijfers.
+
+**6. Hoe hebben we het getest?**
+✅ 13 tests in `network-faults.test.ts`: partitie tijdens vlucht, partitie bij verzenden, herstel vóór aankomst, vervanging van partities, gericht verlies, statistisch verlies (25% ingesteld → gemeten tussen 22% en 28%, vaste seed), vertraging, en restore zonder effect op berichten onderweg. ✅ Mutaties "geen partitiecheck bij aankomst" (5 falen), "geen partitiecheck bij verzenden" (3) en "linkfout in de verkeerde richting" (5) worden gevangen.
+
+**7. Wat heb ik hiervan geleerd?**
+De interessantste vragen zitten in de *overgangen*: wat gebeurt er met dingen die "onderweg" zijn op het moment dat de wereld verandert?
+
+**8. Belangrijkste begrippen**
+- **Netwerkpartitie:** het netwerk valt uiteen in groepen die elkaar niet bereiken.
+- **Split brain:** twee delen van een systeem nemen elk tegelijk beslissingen.
+- **In-flight message:** een bericht dat verstuurd maar nog niet aangekomen is.
+- **Asymmetrische fout:** een fout die maar in één richting optreedt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. In welke volgorde wordt het lot van een bericht bepaald bij verzenden, en bij aankomst?
+2. Waarom raakt een nieuwe partitie berichten onderweg wel, en een linkwijziging niet?
+3. Wat is het verschil tussen `cause` en `conditionIndex` bij een gedropt bericht?
+
+### CP1.5 — Onderzoek: een geheugenlek in de scheduler, opgelost met Floyd's heapify
+
+**1. Wat hebben we gebouwd?**
+**Compactie** van de heap in de scheduler (`scheduler.ts`), met een nieuwe methode `BinaryHeap.retain()` (`priority-queue.ts`).
+
+**2. Waarom hebben we dit nodig?**
+In CP0 werd lazy cancellation al genoemd als mogelijk probleem. Een crash annuleert nu in één keer alle timers van een node, en Raft zet zijn verkiezingstimer bij elk bericht opnieuw. Eerst meten, dan pas oplossen.
+
+**3. Hoe werkt het?**
+✅ **De meting.** Een simulatie van "elke tick een bericht, en bij elk bericht een timer van D ticks resetten", 200.000 stappen, met steeds maar 2 *levende* events:
+
+| Timerduur D | Grootste heap |
+|---|---|
+| 300 | 301 entries |
+| 10.000 | 10.001 entries |
+| 1.000.000 | **200.002 entries** |
+
+Een dode entry verdwijnt pas als zijn geplande tijd aanbreekt. Bij lange timers die vaak gereset worden, groeit de heap dus mee met de looptijd: 100.000 keer meer entries dan nodig.
+
+**De oplossing.** Zodra er minstens 1024 dode entries zijn én dat er meer zijn dan levende, filteren we de array tot alleen de levende events en bouwen we de heap opnieuw op met **Floyd's algoritme**: laat elk knooppunt, van de laatste ouder terug tot de wortel, naar beneden zakken.
+
+```ts
+for (let i = (write >> 1) - 1; i >= 0; i--) this.#siftDown(i);
+```
+
+Waarom is dat O(n) en niet O(n log n)? De helft van de knopen zijn bladeren (geen werk), een kwart zit één niveau hoger (maximaal 1 stap), een achtste twee niveaus (maximaal 2 stappen), enzovoort. De som n/4·1 + n/8·2 + n/16·3 + … blijft onder n.
+
+**4. Welke keuzes hebben we gemaakt?**
+Een alternatief was een *indexed heap*: van elk event de positie bijhouden, zodat je het meteen kunt verwijderen. Dat vraagt extra boekhouding bij élke verwisseling in de heap, de drukst gebruikte code van de engine. Compactie is eenvoudiger. Omdat elke compactie minstens de helft van de array opruimt, kost het gemiddeld (*geamortiseerd*) O(1) per annulering. Zie ADR-0011.
+
+**Waarom verandert dit de simulatie niet?** Uit CP0: de ordening (tijd, seq) is een strikte totale orde. Elke geldige heap met dezelfde events geeft ze dus in exact dezelfde volgorde terug. Compactie is onzichtbaar voor de trace.
+
+**5. Welke problemen kwamen we tegen?**
+Geen bugs, maar wel een les: zonder meting hadden we niet geweten dat het probleem alleen bij *lange* timers speelt. Bij korte timers lost het zichzelf op.
+
+**6. Hoe hebben we het getest?**
+✅ Een model-based property test vergelijkt de scheduler met agressieve drempels (1, 2, 8) met een simpel referentiemodel, en controleert na elke stap dat `heapEntries ≤ 2·levend + drempel`. ✅ De meetopzet van hierboven is nu een regressietest: de heap blijft onder 1.029 entries (was 200.002). ✅ In een heartbeat-run met timeouts van 10⁶ ticks blijft de heap onder 1.200 entries. ✅ De mutatie "retain zonder heapify" laat 2 tests falen.
+
+**7. Wat heb ik hiervan geleerd?**
+Meet eerst. En een sterke invariant uit een eerder checkpoint (de strikte totale orde) maakt een latere optimalisatie veilig zonder extra werk.
+
+**8. Belangrijkste begrippen**
+- **Geheugenlek:** geheugen dat niet vrijkomt terwijl het niet meer nodig is.
+- **Compactie:** opruimen en opnieuw opbouwen van een datastructuur.
+- **Floyd's heapify:** een heap bouwen in O(n) door van onder naar boven te laten zakken.
+- **Geamortiseerde complexiteit:** de gemiddelde kosten per operatie over een lange reeks.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom groeide de heap bij D = 1.000.000 wel en bij D = 300 niet?
+2. Waarom is Floyd's heapify O(n)?
+3. Waarom kan compactie de trace niet veranderen?
+
+### CP1.6 — Testen: een onafhankelijk trace-orakel, willekeurige faultplannen en mutaties
+
+**1. Wat hebben we gebouwd?**
+- Een **trace-orakel** (`test/invariants.ts`): een volledig losse implementatie van de regels die alleen naar de trace kijkt. Het houdt per node de status en incarnatie bij, per timer of hij nog loopt, per bericht of het al afgeleverd of gedropt is, en de actieve partitie. Daarna meldt het elke overtreden regel.
+- **Property tests** (`faults.property.test.ts`) die honderden willekeurige faultplannen genereren en het orakel erop loslaten.
+
+**2. Waarom hebben we dit nodig?**
+Met handgeschreven tests check je alleen de gevallen die je zelf bedenkt. Bij fouten zijn de gevaarlijke gevallen juist de combinaties waar je níét aan denkt: crash + recovery + timer op één tick, tijdens een partitie, met verlies op een link.
+
+**3. Hoe werkt het?**
+fast-check genereert configuraties met een seed, latency en tot 20 fault-groepen. Per plan draait de simulatie, waarna het orakel de trace controleert. Eén orakelregel is bijvoorbeeld: "een `timer.fire` moet dezelfde incarnatie hebben als de `timer.set`". Omdat het orakel geen code deelt met de engine, moet een bug twee keer op dezelfde manier gemaakt worden om erdoor te glippen.
+
+**4. Welke keuzes hebben we gemaakt?**
+Het orakel staat bewust in de tests, niet in de engine. In CP2 wordt het de basis voor een echt invariant-systeem in de engine.
+
+**5. Welke problemen kwamen we tegen?**
+Twee leerzame:
+- **De generator was te braaf.** Alle property tests slaagden meteen. Dat was verdacht, dus hebben we gemeten wat de generator eigenlijk maakte: ✅ maar in 19 van de 150 plannen herstartte er ooit een node. Een losse `recover` op een willekeurig moment raakt meestal een node die nog draait. Een "outage"-generator (crash, en daarna recovery van dezelfde node, soms op dezelfde tick) bracht dat naar ✅ 119 van 150, met 85 keer crash + recovery op dezelfde tick. Les: een property test is zo goed als zijn generator, dus meet die.
+- **Een bug in onze eigen mutatie-tooling.** Een eerste shell-script pijpte één mutant naar `| true`. Daardoor werd het proces afgebroken vóórdat het bestand werd hersteld, en de volgende meting (31 falende tests) was dus nep. We merkten het omdat de normale testsuite daarna faalde. Opgelost met een Python-script dat altijd herstelt (`finally`), een controle met checksums tegen een bekende goede kopie, en het opnieuw draaien van de betreffende mutanten. Les: ook je testgereedschap kan liegen, dus verifieer het.
+
+**6. Hoe hebben we het getest?** (De resultaten)
+✅ 224 tests in 13 bestanden, allemaal geslaagd. De suite draait in ±1,8 s, inclusief 480 willekeurige fault-experimenten (150 + 150 + 75 + 30 + 75 over de vijf property tests). ✅ Dekking: 98,2% van de regels en 96,2% van de branches (CP0: 97,3% en 95,0%). ✅ Alle 15 mutanten (M1–M14 plus M1b) gevangen; zie `docs/TEST_STRATEGY.md`. ✅ Een CP1-trace zonder fouten, teruggebracht naar het CP0-formaat, geeft exact de CP0-vingerafdruk `62159051`. Dat bewijst dat ordening en random trekkingen voor foutloze runs niet veranderd zijn. ✅ Nieuwe golden fingerprints: `d13876e0` (CP0-referentie in het CP1-formaat) en `17b2dde2` (fault-referentie).
+
+✅ **Prestaties** (A/B: de CP0-commit en CP1 naast elkaar op dezelfde laptop, 21 runs per versie, 200.000 events zonder fouten): mediaan **459 ms (CP0) tegenover 477 ms (CP1)**, ongeveer 4% overhead. CP1 heeft soms een trage uitschieter (547–660 ms); de oorzaak is nog niet geprofileerd (💭 mogelijk garbage collection door grotere trace-entries). Een fault-zware run (8 nodes, 1.360 faults, 200.000 events, ±899.000 trace-entries) duurt ±1,4 s.
+
+**7. Wat heb ik hiervan geleerd?**
+Vertrouw niet op "alle tests groen". Controleer of de tests de juiste gevallen raken (generator-diversiteit), of ze falen als de code fout is (mutaties), en of je meetgereedschap zelf klopt.
+
+**8. Belangrijkste begrippen**
+- **Test-orakel:** een onafhankelijke manier om te bepalen of uitvoer correct is.
+- **Invariant:** een eigenschap die altijd waar moet zijn.
+- **Generator:** de code die willekeurige testinvoer maakt.
+- **A/B-meting:** twee versies onder gelijke omstandigheden vergelijken.
+- **Mediaan:** de middelste waarde; minder gevoelig voor uitschieters dan het gemiddelde.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom vangt een onafhankelijk orakel bugs die de assertions in de engine missen?
+2. Hoe ontdekten we dat de generator te weinig recoveries maakte, en waarom was dat erg?
+3. Waarom vergelijk je prestaties met een A/B-meting op dezelfde machine, en waarom met de mediaan?
+
+### CP1 — Bekende beperkingen
+
+- Faults liggen vooraf vast. Er is nog geen tegenstander die reageert op de toestand ("crash de huidige leider"), en ook nog geen interactieve injectie vanuit de UI.
+- Eén persistentiemodel (sync-on-commit). Verlies van niet-gesyncte writes kan nog niet worden gemodelleerd.
+- Geen duplicatie van berichten, geen optionele FIFO-links, geen basislatency per link.
+- Een handler met een oneindige lus kan nog steeds niet worden onderbroken (komt met de Web Worker in CP5).
+- De trage uitschieters in de prestatiemeting zijn nog niet verklaard (zie hieronder).
+
+### CP1 — Open onderzoek PERF-1: trage uitschieters
+
+**Wat zagen we?** ✅ In de A/B-meting (21 runs per versie, 200.000 events zonder fouten) was de mediaan van CP1 477 ms. Toch duurden losse runs 547–660 ms, en dat kwam vaker voor dan bij CP0.
+
+**Is het een correctheidsprobleem?** Nee. ✅ De determinisme-tests laten zien dat de trace bij elke run byte-voor-byte gelijk is. Alleen de *wandkloktijd* (hoe lang het echt duurt) varieert, niet *wat* er berekend wordt. Daarom hebben we besloten de commit hier niet voor uit te stellen en niet blind te optimaliseren.
+
+**Mogelijke oorzaken** (💭 allemaal nog niet geverifieerd):
+1. **Garbage collection (GC):** JavaScript ruimt ongebruikt geheugen automatisch op, en dat kost af en toe een pauze. CP1 maakt per stap iets meer objecten aan (extra `incarnation`-velden, een `storage`-object per handler), dus er valt mogelijk vaker een GC-pauze.
+2. **JIT-deoptimalisatie:** de JavaScript-engine optimaliseert code op basis van de vormen van objecten die hij ziet. Meer soorten trace-entries kan die optimalisatie soms ongedaan maken.
+3. **Ruis:** andere processen op de laptop.
+
+**Plan (CP9):** meten met `node --trace-gc` en `--cpu-prof`, het geheugengebruik per event vergelijken tussen CP0 en CP1, en meer runs doen in een rustigere omgeving. Pas daarna beslissen of en hoe we optimaliseren.
+
+**Wat leer ik hiervan?** Een mediaan vertelt het "normale" verhaal, maar uitschieters kunnen een eigen oorzaak hebben. Benoem ze eerlijk, scheid "is het fout?" van "is het traag?", en optimaliseer pas na meten.
+
+**Begrippen**
+- **Wandkloktijd:** de echte tijd die een berekening kost (in tegenstelling tot virtuele tijd).
+- **Garbage collection:** het automatisch vrijgeven van geheugen dat niet meer gebruikt wordt.
+- **JIT-compiler:** compileert JavaScript tijdens het uitvoeren naar snelle machinecode, op basis van wat hij ziet.
+- **Profileren:** meten waar een programma zijn tijd en geheugen aan besteedt.

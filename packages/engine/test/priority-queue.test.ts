@@ -45,3 +45,30 @@ describe('BinaryHeap', () => {
     );
   });
 });
+
+describe('BinaryHeap.retain (filter + Floyd heapify)', () => {
+  it('keeps exactly the matching items and restores the heap property (property)', () => {
+    fc.assert(
+      fc.property(fc.array(fc.integer({ min: -50, max: 50 })), fc.integer({ min: 2, max: 5 }), (values, modulus) => {
+        const heap = new BinaryHeap(byNumber);
+        values.forEach((v) => heap.push(v));
+        const keep = (v: number) => Math.abs(v) % modulus !== 0;
+        heap.retain(keep);
+        const popped: number[] = [];
+        while (heap.size > 0) popped.push(heap.pop() as number);
+        expect(popped).toEqual(values.filter(keep).sort(byNumber));
+      }),
+    );
+  });
+
+  it('handles retaining nothing and everything', () => {
+    const heap = new BinaryHeap(byNumber);
+    [3, 1, 2].forEach((v) => heap.push(v));
+    heap.retain(() => true);
+    expect(heap.size).toBe(3);
+    expect(heap.peek()).toBe(1);
+    heap.retain(() => false);
+    expect(heap.size).toBe(0);
+    expect(heap.pop()).toBeUndefined();
+  });
+});

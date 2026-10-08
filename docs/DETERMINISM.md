@@ -1,6 +1,6 @@
 # Why FaultLab Simulations Are Deterministic
 
-**Claim.** For a fixed `ENGINE_VERSION`, protocol `name` + `version`, and configuration (seed, nodes, latency, limits), every run produces the same trace, entry for entry, byte for byte after canonical serialisation. That holds on every machine and in every standards-compliant JavaScript engine.
+**Claim.** For a fixed `ENGINE_VERSION`, protocol `name` + `version`, and configuration (seed, nodes, latency, limits, fault plan), every run produces the same trace, entry for entry, byte for byte after canonical serialisation. That holds on every machine and in every standards-compliant JavaScript engine.
 
 **Evidence.** `test/determinism.test.ts`: repeated runs compare equal; a property test over arbitrary seeds, latencies and node counts; stepping one event at a time equals `run()`; a golden fingerprint pins the reference experiment; and the engine is shown not to touch `Math.random`, `Date.now`, or `performance.now`.
 
@@ -21,13 +21,16 @@ A program is deterministic if every value it computes is a function of its input
 | 9 | **Machine-specific error text** | `protocol.error` records `name: message` only, never stack traces (they contain file paths). | Error tests assert exact strings |
 | 10 | **UI/rendering influence** | The engine imports nothing outside itself; frame rate, playback speed, and React state have no path into it. | Architecture test ("imports only its own modules") |
 | 11 | **Configuration aliasing** | `resolveConfig` copies and freezes the config; mutating the caller's arrays after construction has no effect. | `config.test.ts` |
+| 12 | **Faults from outside the inputs** (CP1) | Faults exist only as the config's fault plan, recorded in `run.start`; protocols have no fault API; fault events are ordinary scheduled events in the same total order. | Fault replay property (random plans, identical traces); fault golden fingerprint |
+| 13 | **Randomness consumed by faults** (CP1) | Loss and extra delay draw from the network stream only while a condition is active; fault-free runs draw exactly as in CP0. | CP0-projection test reproduces the CP0 golden fingerprint |
+| 14 | **Heap maintenance** (CP1) | Compaction rebuilds the heap, but with a strict total order every valid heap pops identically, so the trace is unaffected. | Model-based compaction property; golden fingerprints |
 
-Given rows 1–11, each step is a pure function of (scheduler state, node states, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
+Given rows 1–14, each step is a pure function of (scheduler state, node runtimes, network conditions, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
 
 ## What determinism does *not* cover (yet)
 
-- **Protocol code that cheats.** In CP0 a protocol is trusted TypeScript. If it calls `Math.random()` or keeps a module-level counter, determinism is lost, and the engine cannot stop it in-process. Mitigations: the documented contract, the "run twice and compare" test pattern, and later the Worker sandbox (CP6 can stub `Math.random`/`Date` inside the worker; CP11 is a real sandbox).
-- **Non-terminating handlers.** A handler stuck in an infinite loop never returns, so the run produces no result at all. This is a liveness problem, not a determinism problem, and it is solved by a wall-clock watchdog *outside* the simulation (CP6). Such aborts are reported as "aborted", never recorded as a reproducible outcome.
+- **Protocol code that cheats.** In CP0 a protocol is trusted TypeScript. If it calls `Math.random()` or keeps a module-level counter, determinism is lost, and the engine cannot stop it in-process. Mitigations: the documented contract, the "run twice and compare" test pattern, and later the Worker sandbox (CP5 can stub `Math.random`/`Date` inside the worker; CP10 is a real sandbox).
+- **Non-terminating handlers.** A handler stuck in an infinite loop never returns, so the run produces no result at all. This is a liveness problem, not a determinism problem, and it is solved by a wall-clock watchdog *outside* the simulation (CP5). Such aborts are reported as "aborted", never recorded as a reproducible outcome.
 - **Engine changes.** Reproducibility is promised only for identical `ENGINE_VERSION`. The golden-fingerprint test fails whenever observable semantics change. The fix is to bump the version deliberately, not to update the hash quietly.
 - **Transcendental math in protocols.** `Math.sin`, `Math.exp` and friends are *not* required by the spec to be correctly rounded and can differ between engines. Protocols should keep decisions integer-based. (The engine itself uses none.)
 

@@ -1,11 +1,14 @@
-import { resolveConfig, MAX_DELAY, type ResolvedConfig, type SimulationConfig } from './config';
-import { EngineInvariantError, ProtocolViolationError } from './errors';
+import { resolveConfig, type ResolvedConfig, type SimulationConfig } from './config';
+import { createNodeContext, type Effect, type StorageWrites } from './context';
+import { EngineInvariantError } from './errors';
+import type { Fault } from './faults';
 import { toFrozenJson, type JsonValue } from './json';
-import { VirtualNetwork } from './network';
-import type { FiredTimer, IncomingMessage, MessageId, NodeContext, NodeId, TimerId } from './protocol';
-import { deriveStream, type RandomSource, type Xoshiro128 } from './random';
-import { EventScheduler, type EventSeq } from './scheduler';
-import type { Duration, VirtualTime } from './time';
+import { VirtualNetwork, type DropReason } from './network';
+import { NodeRuntime, type NodeStatus } from './node';
+import type { FiredTimer, IncomingMessage, MessageId, NodeContext, NodeId } from './protocol';
+import { deriveStream } from './random';
+import { EventScheduler } from './scheduler';
+import type { VirtualTime } from './time';
 import { EventTrace, type StopReason, type TraceEntry } from './trace';
 import { ENGINE_VERSION } from './version';
 
@@ -13,7 +16,15 @@ import { ENGINE_VERSION } from './version';
 type SimEvent =
   | { readonly kind: 'node.start'; readonly node: NodeId; readonly cause: number }
   | { readonly kind: 'message.deliver'; readonly message: Envelope; readonly cause: number }
-  | { readonly kind: 'timer.fire'; readonly node: NodeId; readonly timer: FiredTimer; readonly cause: number };
+  | {
+      readonly kind: 'timer.fire';
+      readonly node: NodeId;
+      readonly timer: FiredTimer;
+      /** Incarnation that set the timer. Must equal the node's incarnation when it fires. */
+      readonly incarnation: number;
+      readonly cause: number;
+    }
+  | { readonly kind: 'fault'; readonly fault: Fault; readonly cause: number };
 
 interface Envelope {
   readonly id: MessageId;
@@ -21,28 +32,6 @@ interface Envelope {
   readonly to: NodeId;
   readonly payload: JsonValue;
   readonly sentAt: VirtualTime;
-}
-
-/** A buffered side effect requested by a handler, applied only if the handler succeeds. */
-type Effect =
-  | { readonly kind: 'send'; readonly id: MessageId; readonly to: NodeId; readonly payload: JsonValue }
-  | { readonly kind: 'set-timer'; readonly id: TimerId; readonly tag: string; readonly delay: Duration }
-  | { readonly kind: 'cancel-timer'; readonly id: TimerId };
-
-type NodeStatus = 'idle' | 'running';
-
-/** Engine-side bookkeeping for one virtual node. Protocol code never sees this object. */
-interface NodeRuntime {
-  readonly id: NodeId;
-  readonly peers: readonly NodeId[];
-  readonly random: Xoshiro128;
-  status: NodeStatus;
-  /** Volatile protocol state. undefined until init has run. */
-  state: JsonValue | undefined;
-  messagesSent: number;
-  timersSet: number;
-  /** Pending timers owned by this node, mapped to their scheduler sequence numbers. */
-  readonly timers: Map<TimerId, EventSeq>;
 }
 
 export interface RunResult {
@@ -53,15 +42,19 @@ export interface RunResult {
   readonly trace: readonly TraceEntry[];
 }
 
-const MAX_TIMER_TAG_LENGTH = 64;
+export interface NodeInfo {
+  readonly status: NodeStatus;
+  readonly incarnation: number;
+}
 
 /**
  * One deterministic simulation run.
  *
  * The main loop is: take the earliest live event from the scheduler, advance the virtual clock
- * to its time, run the matching protocol handler on the target node, then apply the handler's
- * buffered effects (which schedule new events) and record everything in the trace.
- * Nothing in this loop reads wall-clock time, global randomness, or UI state.
+ * to its time, and dispatch it — a protocol handler on a running node, a drop, or a fault from
+ * the fault plan. A handler's buffered effects (which schedule new events) are applied only if
+ * it succeeds, and everything is recorded in the trace. Nothing in this loop reads wall-clock
+ * time, global randomness, or UI state.
  */
 export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = JsonValue> {
   readonly config: ResolvedConfig<S, M>;
@@ -74,7 +67,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
 
   constructor(config: SimulationConfig<S, M>) {
     this.config = resolveConfig(config);
-    const { seed, nodes, protocol, network, limits } = this.config;
+    const { seed, nodes, protocol, network, limits, faults } = this.config;
     this.#network = new VirtualNetwork(network, deriveStream(seed, 'network'));
 
     const runStart = this.#trace.append({
@@ -87,22 +80,21 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       nodes,
       latency: network.latency,
       limits,
+      persistence: 'sync-on-commit',
+      faults,
     });
 
     for (const id of nodes) {
-      this.#nodes.set(id, {
-        id,
-        peers: Object.freeze(nodes.filter((other) => other !== id)),
-        random: deriveStream(seed, `node:${id}`),
-        status: 'idle',
-        state: undefined,
-        messagesSent: 0,
-        timersSet: 0,
-        timers: new Map(),
-      });
+      const peers = Object.freeze(nodes.filter((other) => other !== id));
+      this.#nodes.set(id, new NodeRuntime(id, peers, deriveStream(seed, `node:${id}`)));
       // All nodes start at t=0 in configuration order. These are the first events scheduled,
-      // so they run before any message, even one sent with zero latency.
+      // so they run before anything else at t=0, even a fault or a zero-latency message.
       this.#scheduler.schedule(0, { kind: 'node.start', node: id, cause: runStart });
+    }
+    // Plan faults are scheduled next, so at any given time they precede every event that is
+    // scheduled during the run (ADR-0009). Among themselves they keep plan order.
+    for (const fault of faults) {
+      this.#scheduler.schedule(fault.at, { kind: 'fault', fault, cause: runStart });
     }
   }
 
@@ -128,9 +120,25 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     return this.#trace.snapshot();
   }
 
-  /** Current volatile state of a node (deeply frozen), or undefined before it started. */
+  /** Scheduler diagnostics: live events, physical heap entries, compactions (ADR-0011). */
+  get schedulerStats(): { readonly pending: number; readonly heapEntries: number; readonly compactions: number } {
+    return this.#scheduler.stats;
+  }
+
+  /** Current volatile state of a node (deeply frozen), or undefined before it started or while crashed. */
   nodeState(id: NodeId): JsonValue | undefined {
     return this.#node(id).state;
+  }
+
+  /** Committed persistent storage of a node, as a frozen object with sorted keys. */
+  nodeStorage(id: NodeId): Readonly<Record<string, JsonValue>> {
+    const storage = this.#node(id).storage;
+    return Object.freeze(Object.fromEntries([...storage.keys()].sort().map((key) => [key, storage.get(key) as JsonValue])));
+  }
+
+  nodeInfo(id: NodeId): NodeInfo {
+    const node = this.#node(id);
+    return Object.freeze({ status: node.status, incarnation: node.incarnation });
   }
 
   /**
@@ -192,7 +200,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     return node;
   }
 
-  /** Returns false if the protocol handler failed. */
+  /** Returns false if a protocol handler failed. */
   #dispatch(event: SimEvent): boolean {
     const { protocol } = this.config;
     const time = this.#scheduler.now;
@@ -200,22 +208,32 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     switch (event.kind) {
       case 'node.start': {
         const node = this.#node(event.node);
-        const entry = this.#trace.append({ kind: 'node.start', time, cause: event.cause, node: node.id });
-        node.status = 'running';
+        node.boot();
+        const entry = this.#trace.append({ kind: 'node.start', time, cause: event.cause, node: node.id, incarnation: node.incarnation });
         return this.#invoke(node, entry, (ctx) => protocol.init(ctx));
       }
 
       case 'message.deliver': {
         const { message } = event;
         const node = this.#node(message.to);
-        // CP0 has no crashes, and start events precede every delivery. CP1 turns this case
-        // into a traced `message.drop` for crashed nodes.
+        // Network first: a message cut off by a partition never reached the machine at all.
+        const partitionIndex = this.#network.blockedAtDelivery(message.from, message.to);
+        if (partitionIndex !== null) {
+          this.#drop(message, 'partitioned-in-flight', partitionIndex, event.cause);
+          return true;
+        }
+        if (node.status === 'crashed') {
+          this.#drop(message, 'node-down', node.crashedAt as number, event.cause);
+          return true;
+        }
         if (node.status !== 'running') throw new EngineInvariantError(`delivery to ${node.id} before it started`);
+
         const entry = this.#trace.append({
           kind: 'message.deliver',
           time,
           cause: event.cause,
           node: node.id,
+          incarnation: node.incarnation,
           from: message.from,
           messageId: message.id,
           payload: message.payload,
@@ -231,28 +249,120 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
 
       case 'timer.fire': {
         const node = this.#node(event.node);
+        // A crash cancels every pending timer eagerly, so this can only fail through an engine
+        // bug. It is asserted anyway: a stale timer firing would silently corrupt the trace.
+        if (node.status !== 'running' || event.incarnation !== node.incarnation) {
+          throw new EngineInvariantError(
+            `timer ${event.timer.id} of incarnation ${event.incarnation} reached ${node.id} ` +
+              `(status ${node.status}, incarnation ${node.incarnation})`,
+          );
+        }
         node.timers.delete(event.timer.id);
         const entry = this.#trace.append({
           kind: 'timer.fire',
           time,
           cause: event.cause,
           node: node.id,
+          incarnation: node.incarnation,
           timerId: event.timer.id,
           tag: event.timer.tag,
         });
         return this.#invoke(node, entry, (ctx) => protocol.onTimer(node.state as S, event.timer, ctx));
       }
+
+      case 'fault':
+        return this.#applyFault(event.fault, event.cause);
     }
+  }
+
+  /** Apply one fault from the plan. Every fault yields exactly one trace entry (applied or skipped). */
+  #applyFault(fault: Fault, cause: number): boolean {
+    const time = this.#scheduler.now;
+    const base = { time, cause, faultId: fault.id } as const;
+
+    switch (fault.type) {
+      case 'crash': {
+        const node = this.#node(fault.node);
+        if (node.status === 'idle') throw new EngineInvariantError(`crash of ${node.id} before it started`);
+        if (node.status === 'crashed') {
+          this.#trace.append({ ...base, kind: 'fault.skipped', faultType: 'crash', node: node.id, reason: 'already-crashed' });
+          return true;
+        }
+        const cancelled = node.crash();
+        for (const [, seq] of cancelled) this.#scheduler.cancel(seq);
+        node.crashedAt = this.#trace.append({
+          ...base,
+          kind: 'node.crash',
+          node: node.id,
+          incarnation: node.incarnation,
+          cancelledTimers: cancelled.map(([timerId]) => timerId),
+        });
+        return true;
+      }
+
+      case 'recover': {
+        const node = this.#node(fault.node);
+        if (node.status === 'idle') throw new EngineInvariantError(`recovery of ${node.id} before it started`);
+        if (node.status === 'running') {
+          this.#trace.append({ ...base, kind: 'fault.skipped', faultType: 'recover', node: node.id, reason: 'not-crashed' });
+          return true;
+        }
+        node.boot();
+        const entry = this.#trace.append({ ...base, kind: 'node.recover', node: node.id, incarnation: node.incarnation });
+        return this.#invoke(node, entry, (ctx) => this.config.protocol.init(ctx));
+      }
+
+      case 'partition': {
+        const entry = this.#trace.append({ ...base, kind: 'network.partition', groups: fault.groups });
+        this.#network.partition(fault.groups, entry);
+        return true;
+      }
+
+      case 'heal':
+        this.#trace.append({ ...base, kind: 'network.heal' });
+        this.#network.heal();
+        return true;
+
+      case 'link': {
+        const entry = this.#trace.append({ ...base, kind: 'link.fault', from: fault.from, to: fault.to, loss: fault.loss, delay: fault.delay });
+        this.#network.setLink(fault.from, fault.to, fault, entry);
+        return true;
+      }
+
+      case 'link-restore':
+        this.#trace.append({ ...base, kind: 'link.restore', from: fault.from, to: fault.to });
+        this.#network.restoreLink(fault.from, fault.to);
+        return true;
+    }
+  }
+
+  #drop(message: Envelope, reason: DropReason, conditionIndex: number, sendIndex: number): void {
+    this.#trace.append({
+      kind: 'message.drop',
+      time: this.#scheduler.now,
+      cause: sendIndex,
+      node: message.to,
+      from: message.from,
+      messageId: message.id,
+      reason,
+      conditionIndex,
+    });
   }
 
   /**
    * Run one protocol handler as an atomic step. Exceptions thrown by protocol code (including
    * API misuse and invalid state) are recorded as `protocol.error`; engine bugs outside the
    * handler call are not caught and propagate to the caller.
+   *
+   * Commit order within a step: storage writes (durable first), then effects in call order,
+   * then the state update.
    */
   #invoke(node: NodeRuntime, cause: number, handler: (ctx: NodeContext<M>) => S): boolean {
-    const effects: Effect[] = [];
-    const context = this.#createContext(node, effects);
+    const context = createNodeContext<M>(node, {
+      now: this.#scheduler.now,
+      isNode: (id) => this.#nodes.has(id),
+      maxEffects: this.config.limits.maxPendingEvents,
+    });
     let nextState: JsonValue;
     try {
       const result: unknown = handler(context.api);
@@ -263,6 +373,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
         time: this.#scheduler.now,
         cause,
         node: node.id,
+        incarnation: node.incarnation,
         error: describeError(error),
       });
       return false;
@@ -270,13 +381,46 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       context.expire();
     }
 
-    context.commitCounters();
+    const { effects, storageWrites } = context.commit();
+    this.#commitStorage(node, storageWrites, cause);
     this.#applyEffects(node, effects, cause);
     if (nextState !== node.state) {
       node.state = nextState;
-      this.#trace.append({ kind: 'state.update', time: this.#scheduler.now, cause, node: node.id, state: nextState });
+      this.#trace.append({
+        kind: 'state.update',
+        time: this.#scheduler.now,
+        cause,
+        node: node.id,
+        incarnation: node.incarnation,
+        state: nextState,
+      });
     }
     return true;
+  }
+
+  #commitStorage(node: NodeRuntime, writes: StorageWrites, cause: number): void {
+    if (writes.size === 0) return;
+    const set: Record<string, JsonValue> = {};
+    const deleted: string[] = [];
+    for (const key of [...writes.keys()].sort()) {
+      const value = writes.get(key);
+      if (value === undefined) {
+        node.storage.delete(key);
+        deleted.push(key);
+      } else {
+        node.storage.set(key, value);
+        Object.defineProperty(set, key, { value, enumerable: true });
+      }
+    }
+    this.#trace.append({
+      kind: 'storage.write',
+      time: this.#scheduler.now,
+      cause,
+      node: node.id,
+      incarnation: node.incarnation,
+      set: Object.freeze(set),
+      deleted: Object.freeze(deleted),
+    });
   }
 
   #applyEffects(node: NodeRuntime, effects: readonly Effect[], cause: number): void {
@@ -290,16 +434,18 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
             time: now,
             cause,
             node: node.id,
+            incarnation: node.incarnation,
             to: effect.to,
             messageId: effect.id,
             payload: effect.payload,
-            deliverAt: decision.deliverAt,
+            deliverAt: decision.kind === 'deliver' ? decision.deliverAt : null,
           });
-          this.#scheduler.schedule(decision.deliverAt, {
-            kind: 'message.deliver',
-            message: { id: effect.id, from: node.id, to: effect.to, payload: effect.payload, sentAt: now },
-            cause: sendIndex,
-          });
+          const message: Envelope = { id: effect.id, from: node.id, to: effect.to, payload: effect.payload, sentAt: now };
+          if (decision.kind === 'drop') {
+            this.#drop(message, decision.reason, decision.conditionIndex, sendIndex);
+          } else {
+            this.#scheduler.schedule(decision.deliverAt, { kind: 'message.deliver', message, cause: sendIndex });
+          }
           break;
         }
         case 'set-timer': {
@@ -309,12 +455,19 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
             time: now,
             cause,
             node: node.id,
+            incarnation: node.incarnation,
             timerId: effect.id,
             tag: effect.tag,
             fireAt,
           });
           const timer: FiredTimer = Object.freeze({ id: effect.id, tag: effect.tag, setAt: now });
-          const seq = this.#scheduler.schedule(fireAt, { kind: 'timer.fire', node: node.id, timer, cause: setIndex });
+          const seq = this.#scheduler.schedule(fireAt, {
+            kind: 'timer.fire',
+            node: node.id,
+            timer,
+            incarnation: node.incarnation,
+            cause: setIndex,
+          });
           node.timers.set(effect.id, seq);
           break;
         }
@@ -323,84 +476,11 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
           if (seq === undefined) break; // already fired, already cancelled, or never existed
           this.#scheduler.cancel(seq);
           node.timers.delete(effect.id);
-          this.#trace.append({ kind: 'timer.cancel', time: now, cause, node: node.id, timerId: effect.id });
+          this.#trace.append({ kind: 'timer.cancel', time: now, cause, node: node.id, incarnation: node.incarnation, timerId: effect.id });
           break;
         }
       }
     }
-  }
-
-  #createContext(node: NodeRuntime, effects: Effect[]): { api: NodeContext<M>; expire(): void; commitCounters(): void } {
-    const maxEffects = this.config.limits.maxPendingEvents;
-    let active = true;
-    let messagesSent = node.messagesSent;
-    let timersSet = node.timersSet;
-
-    const guard = (operation: string): void => {
-      if (!active) {
-        throw new ProtocolViolationError(`ctx.${operation} was called after its handler returned`);
-      }
-    };
-    const push = (effect: Effect): void => {
-      if (effects.length >= maxEffects) {
-        throw new ProtocolViolationError(`a single handler produced more than ${maxEffects} effects`);
-      }
-      effects.push(effect);
-    };
-    const send = (to: NodeId, payload: M): MessageId => {
-      guard('send');
-      if (to === node.id) throw new ProtocolViolationError(`${node.id} cannot send a message to itself`);
-      if (typeof to !== 'string' || !this.#nodes.has(to)) {
-        throw new ProtocolViolationError(`${node.id} sent to unknown node ${String(to)}`);
-      }
-      const id = `${node.id}:m${++messagesSent}`;
-      push({ kind: 'send', id, to, payload: toFrozenJson(payload, `send(${to}).payload`) });
-      return id;
-    };
-
-    const random: RandomSource = Object.freeze({
-      nextUint32: () => (guard('random'), node.random.nextUint32()),
-      nextFloat: () => (guard('random'), node.random.nextFloat()),
-      nextInt: (min: number, max: number) => (guard('random'), node.random.nextInt(min, max)),
-      chance: (p: number) => (guard('random'), node.random.chance(p)),
-    });
-
-    const api: NodeContext<M> = Object.freeze({
-      self: node.id,
-      now: this.#scheduler.now,
-      peers: node.peers,
-      random,
-      send,
-      broadcast: (payload: M) => node.peers.map((peer) => send(peer, payload)),
-      setTimer: (delay: Duration, tag: string): TimerId => {
-        guard('setTimer');
-        if (!Number.isSafeInteger(delay) || delay < 0 || delay > MAX_DELAY) {
-          throw new ProtocolViolationError(`timer delay must be an integer in [0, ${MAX_DELAY}], got ${String(delay)}`);
-        }
-        if (typeof tag !== 'string' || tag.length > MAX_TIMER_TAG_LENGTH) {
-          throw new ProtocolViolationError(`timer tag must be a string of at most ${MAX_TIMER_TAG_LENGTH} characters`);
-        }
-        const id = `${node.id}:t${++timersSet}`;
-        push({ kind: 'set-timer', id, tag, delay });
-        return id;
-      },
-      cancelTimer: (id: TimerId): void => {
-        guard('cancelTimer');
-        if (typeof id !== 'string') throw new ProtocolViolationError('timer id must be a string');
-        push({ kind: 'cancel-timer', id });
-      },
-    });
-
-    return {
-      api,
-      expire: () => {
-        active = false;
-      },
-      commitCounters: () => {
-        node.messagesSent = messagesSent;
-        node.timersSet = timersSet;
-      },
-    };
   }
 }
 

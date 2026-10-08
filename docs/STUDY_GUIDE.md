@@ -49,10 +49,46 @@ AI-assisted code is only portfolio-worthy if you can defend every line in an int
 
 Be able to give the 2-minute version: *enumerate all sources of ambient information, close each, then prove by induction over steps.* Then name the three things it does **not** cover (cheating protocols, non-terminating handlers, engine version changes).
 
+## 7. Node lifecycle and incarnations (CP1) — `src/node.ts`, `#applyFault` and `timer.fire` in `src/simulation.ts`
+
+**Know:** the four state categories and what a crash does to each; why timers are cancelled eagerly *and* asserted at dispatch; why the incarnation is not exposed to protocols.
+
+**Exercises**
+1. Without running anything, write the trace entries at t=10 for: a timer due at 10, `crash` at 10, `recover` at 10, where the recovered `init` sets a 0-delay timer. Compare with the test "crash, recover and the old timer at one tick".
+2. Delete the eager cancellation in the `crash` case. Which error appears, and from where? Then also disable the incarnation assertion and see which oracle rule catches it (mutants M1/M1b in TEST_STRATEGY).
+
+## 8. Persistence — `src/context.ts` (storage overlay) and `#commitStorage`
+
+**Know:** read-your-writes via an overlay map; why storage writes are committed before the step's messages; why "crashes only between steps" makes `sync-on-commit` sound.
+
+**Exercise:** design (on paper) an explicit-`sync()` persistence mode. What new state does `NodeRuntime` need, what does a crash discard, and which new trace entry would make it explainable?
+
+## 9. Network faults — `src/network.ts` (`route`, `blockedAtDelivery`)
+
+**Know:** the send-time order (partition → loss → latency) and the delivery-time order (partition → crashed receiver); why link conditions are fixed at send but partitions are re-checked at delivery; what `conditionIndex` points to.
+
+**Exercise:** make partitions send-only (remove the delivery check). Which tests fail? Write a paragraph arguing which semantics models a real cable cut better.
+
+## 10. Floyd's heapify and compaction — `BinaryHeap.retain`, `EventScheduler.cancel`
+
+**Know:** why bottom-up heapify is O(n) (most nodes are near the leaves); why compaction is amortised O(1) per cancel; why it cannot change the trace.
+
+**Exercise:** derive the bound `heapEntries ≤ 2·live + threshold`. Then set the threshold to 1 and measure the benchmark. What does compaction cost when it runs too often?
+
+## 11. The trace oracle — `test/invariants.ts`
+
+**Know:** why an independent re-implementation of the rules catches bugs the engine's own assertions can't; how property tests feed it random fault plans; why generator diversity had to be measured.
+
+**Exercise:** add a rule: "a `message.drop` with reason `lost` happens at its send time". Run the property tests.
+
 ## Interview-style questions to practise
 
 - Why integer ticks instead of float milliseconds? What would break first with floats?
 - What is the difference between a queue event and a trace entry?
-- How would you implement "step backwards"? (Today: re-derive from the trace. CP4: snapshot + re-execute.)
+- How would you implement "step backwards"? (Today: re-derive from the trace. CP3: snapshot + re-execute.)
 - Why are links not FIFO, and which real protocols care?
 - If two runs with the same seed differ, how would you find the cause? (Hint: diff the canonical traces, look at the first differing index, follow its `cause` chain.)
+- What survives a crash in FaultLab, and why is the node's random stream *not* reset?
+- A crash and a timer are both due at t=10. Which happens first, and which rule guarantees it?
+- Why is a message in flight lost when a partition starts, but not when a link's loss rate changes?
+- Lazy deletion leaked memory in one workload. How did you measure it, and why can compaction not change the simulation's outcome?

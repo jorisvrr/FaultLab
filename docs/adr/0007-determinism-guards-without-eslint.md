@@ -10,9 +10,9 @@
 
 **Alternatives.**
 - *ESLint `no-restricted-globals`/`no-restricted-properties`:* precise (AST-based) and editor-integrated, but adds a dependency tree and config for rules the two layers above already cover.
-- *Runtime stubbing* (replacing `Math.random` during handlers): also catches *protocol* violations, but mutates globals in-process. Better done inside the Worker in CP6.
+- *Runtime stubbing* (replacing `Math.random` during handlers): also catches *protocol* violations, but mutates globals in-process. Better done inside the Worker in CP5.
 
-**Trade-off.** The text scan is cruder than an AST rule (it could false-positive on a string literal). That is acceptable for a small, controlled codebase; ESLint arrives with the UI in CP6, and these rules can move there.
+**Trade-off.** The text scan is cruder than an AST rule (it could false-positive on a string literal). That is acceptable for a small, controlled codebase; ESLint arrives with the UI in CP5, and these rules can move there.
 
 **Invariant.** Engine source references no wall-clock, timer, async, or ambient-randomness API, and imports nothing outside itself.
 

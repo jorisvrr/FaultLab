@@ -12,6 +12,9 @@ export type VirtualTime = number;
 /** A non-negative span of simulated time in ticks. */
 export type Duration = number;
 
+/** Upper bound on any single latency or timer delay (~24.8 simulated days at 1 tick = 1 ms). */
+export const MAX_DELAY = 2 ** 31;
+
 export function isVirtualTime(value: unknown): value is VirtualTime {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }

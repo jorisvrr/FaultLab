@@ -35,7 +35,7 @@ describe('CP0: three nodes exchanging messages', () => {
       expect(send?.kind).toBe('message.send');
       if (send?.kind !== 'message.send') continue;
       expect(deliver.time).toBe(send.deliverAt);
-      expect(send.deliverAt - send.time).toBe(5);
+      expect(send.deliverAt! - send.time).toBe(5);
       expect([deliver.node, deliver.from, deliver.payload]).toEqual([send.to, send.node, send.payload]);
     }
   });
@@ -70,7 +70,7 @@ describe('CP0: three nodes exchanging messages', () => {
       const run = runSimulation(config(createPingProtocol({ rounds: 3, jitter: 10 }), { seed, network: { latency: { min: 0, max: 20 } } }));
       for (const deliver of ofKind(run.trace, 'message.deliver')) {
         const send = run.trace[deliver.cause as number];
-        expect(send?.kind === 'message.send' && deliver.time >= send.time && send.deliverAt - send.time <= 20).toBe(true);
+        expect(send?.kind === 'message.send' && deliver.time >= send.time && send.deliverAt! - send.time <= 20).toBe(true);
       }
     }
   });

@@ -23,6 +23,22 @@ export interface FiredTimer {
 }
 
 /**
+ * Persistent key-value storage of one node (ADR-0008, `sync-on-commit`).
+ *
+ * Survives crashes; volatile `state` does not. Writes are buffered with the handler's other
+ * effects and become durable atomically when the step commits — before any of the step's
+ * messages leave. Reads see the handler's own uncommitted writes.
+ */
+export interface NodeStorage {
+  get(key: string): JsonValue | undefined;
+  /** `value` must be plain JSON; it is copied and frozen. Keys are 1–128 characters. */
+  set(key: string, value: JsonValue): void;
+  delete(key: string): void;
+  /** All keys, sorted, including this handler's uncommitted writes. */
+  keys(): string[];
+}
+
+/**
  * Everything a protocol handler may do or observe. A context is only valid during the single
  * handler call it was created for; using it afterwards throws ProtocolViolationError.
  *
@@ -37,6 +53,8 @@ export interface NodeContext<M extends JsonValue> {
   readonly peers: readonly NodeId[];
   /** This node's private random stream. Never use Math.random in protocol code. */
   readonly random: RandomSource;
+  /** Durable storage that survives crashes. Everything else a node holds is lost. */
+  readonly storage: NodeStorage;
   /** Send `payload` to `to`. The payload is copied and frozen immediately. */
   send(to: NodeId, payload: M): MessageId;
   /** Send `payload` to every peer, in `peers` order. */
@@ -61,7 +79,10 @@ export interface Protocol<S extends JsonValue = JsonValue, M extends JsonValue =
   readonly name: string;
   /** Bump when behaviour changes: traces are only reproducible for identical versions. */
   readonly version: string;
-  /** Called when the node starts. Returns the node's initial volatile state. */
+  /**
+   * Called when the node starts AND when it recovers from a crash. Returns the initial volatile
+   * state. After a crash, everything the node still knows is in `ctx.storage`.
+   */
   init(ctx: NodeContext<M>): S;
   onMessage(state: S, message: IncomingMessage<M>, ctx: NodeContext<M>): S;
   onTimer(state: S, timer: FiredTimer, ctx: NodeContext<M>): S;

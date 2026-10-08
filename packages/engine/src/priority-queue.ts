@@ -38,6 +38,25 @@ export class BinaryHeap<T> {
     return top;
   }
 
+  /**
+   * Keep only the items for which `keep` returns true, then restore the heap property with
+   * Floyd's bottom-up heapify: sift down every internal node, from the last parent to the root.
+   *
+   * Why this is O(n) and not O(n log n): half the nodes are leaves (no work), a quarter sit one
+   * level up (at most 1 swap), an eighth two levels up (at most 2), ... The sum n/4·1 + n/8·2 +
+   * n/16·3 + ... converges to n. Building by n separate pushes would cost O(n log n).
+   */
+  retain(keep: (item: T) => boolean): void {
+    const items = this.#items;
+    let write = 0;
+    for (let read = 0; read < items.length; read++) {
+      const item = items[read] as T;
+      if (keep(item)) items[write++] = item;
+    }
+    items.length = write;
+    for (let i = (write >> 1) - 1; i >= 0; i--) this.#siftDown(i);
+  }
+
   /** Children of i live at 2i+1 and 2i+2; the parent of i lives at floor((i-1)/2). */
   #siftUp(index: number): void {
     const items = this.#items;

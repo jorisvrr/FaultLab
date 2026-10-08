@@ -12,9 +12,10 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | A4 | **Zero-delay livelock.** `setTimer(0)` or zero latency in a loop: time never advances. | `maxTime` doesn't help because time is stuck. | ✅ `maxEvents` still bounds it. |
 | A5 | **Time overflow.** `now + delay` beyond 2⁵³ loses integer precision. | Unreachable in normal use. | 🟡 Delays capped at 2³¹; with default limits, max reachable time ≈ 2⁴⁷·⁶. The scheduler rejects unsafe integers as an invariant error. |
 | A6 | **Off-by-one limits.** Is an event *at* `maxTime` processed? Is a run that ends exactly on `maxEvents` "quiescent"? | Ambiguity leads to different traces across versions. | ✅ Specified in [SEMANTICS §4](SEMANTICS.md) and tested at both edges. |
-| A7 | **Start order vs. zero-latency messages.** Could n1's zero-latency message reach n2 before n2 has started? | Depends on scheduling order details. | ✅ All starts are scheduled first; FIFO ties guarantee starts precede deliveries. CP0 asserts this as an invariant. |
+| A7 | **Start order vs. zero-latency messages.** Could n1's zero-latency message reach n2 before n2 has started? | Depends on scheduling order details. | ✅ All starts are scheduled first; FIFO ties guarantee starts precede deliveries. The engine asserts this as an invariant. |
 | A8 | **Cancelled events counted as pending** (or as processed). | Breaks limits and quiescence detection. | ✅ Live set separate from heap; tests check `pendingCount`. |
-| A9 | **Unbounded dead entries in the heap** from lazy cancellation. | Memory grows with cancel-heavy protocols (Raft resets election timers constantly). | 🔜 CP5: compact the heap when dead > live. Measure first. |
+| A9 | **Unbounded dead entries in the heap** from lazy cancellation. | Dead entries leave only at their scheduled time, so long timers that are reset often pile up (measured: 2 live events, 200 002 heap entries). | ✅ CP1: compaction when dead ≥ 1024 and dead > live ([ADR-0011](adr/0011-scheduler-heap-compaction.md)). Model-based property + regression tests. |
+| A10 | **Faults and protocol events at the same tick.** Does a crash at t=10 beat a timer due at t=10? | Implicit answers differ between implementations. | ✅ Plan faults are scheduled before the run, so they precede runtime events at equal time; plan order among faults ([ADR-0009](adr/0009-fault-plan-as-input.md)). Tested for crash+timer, crash+recover+timer, crash+delivery, recover+delivery. |
 
 ## B. Messages, state, aliasing
 
@@ -25,10 +26,14 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | B3 | **Non-serialisable data** (Map, Date, class instance, `undefined`, NaN, cycles, getters, sparse arrays, `-0`). Traces and snapshots silently lose or change it. | ✅ Rejected with a path, except `-0`, which is normalised to `0`. |
 | B4 | **Self-send semantics.** Should it be instantaneous, go through the network, or be forbidden? | ✅ Forbidden in CP0 (`ProtocolViolationError`). Revisit if a protocol needs it. |
 | B5 | **Prototype pollution via `"__proto__"` keys** in payloads. | ✅ Copied with `defineProperty`; tested. |
-| B6 | **Message to a crashed node.** | 🔜 CP1: traced `message.drop { reason: 'node-down' }`. CP0 asserts it cannot happen. |
-| B7 | **Stale timers after recovery.** A timer set before a crash fires after the node restarts and confuses the new incarnation. | 🔜 CP1: crash cancels all pending timers; incarnation numbers on timers and nodes. |
-| B8 | **Messages from a previous incarnation** arriving after recovery. | 🔜 CP1: they are legitimately delivered (the network doesn't know about crashes). Protocols must tolerate them. Document per protocol. |
-| B9 | **FIFO assumptions.** A protocol silently relies on in-order delivery, which CP0's random latency doesn't provide. | 🟡 Documented: links are not FIFO. CP2 may add an opt-in FIFO link model. |
+| B6 | **Message to a crashed node.** | ✅ Traced `message.drop { reason: 'node-down', conditionIndex → node.crash }`. |
+| B7 | **Stale timers after recovery.** A timer set before a crash fires after the node restarts and confuses the new incarnation. | ✅ A crash eagerly cancels all pending timers; dispatch asserts the incarnation as defence in depth. Property-tested with random crash/recover plans, including same-tick cases. |
+| B8 | **Messages from a previous incarnation** arriving after recovery. | ✅ Delivered to the current incarnation by design (the network doesn't know about crashes). Protocols must tolerate them; documented in SEMANTICS §9. |
+| B9 | **FIFO assumptions.** A protocol silently relies on in-order delivery, which random latency doesn't provide. | 🟡 Documented: links are not FIFO. An opt-in FIFO link model is a deferred feature. |
+| B10 | **Partition semantics for messages in flight.** Do messages tunnel through a new partition? | ✅ Partitions are checked at send and at delivery; link conditions only at send ([ADR-0010](adr/0010-network-fault-semantics.md)). |
+| B11 | **Lost durability.** Writes from a failed step persisted, or committed writes lost at a crash. | ✅ `sync-on-commit`: storage writes are part of the atomic step; crashes occur only between steps. Mutation-tested. |
+| B12 | **Persist-after-send.** A node replies before its vote is durable; a crash right after would let it vote twice. | ✅ Commit order puts `storage.write` before the step's messages (persist-before-send). Since crashes are step-granular this is a modelling statement, made explicit in the trace. |
+| B13 | **Silently ignored config typos** (`fault:` instead of `faults:`, `nodes` instead of `node`). | ✅ Unknown fields are rejected at every level of the config and fault plan. |
 
 ## C. Protocol execution
 
@@ -36,9 +41,9 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 |---|---|---|
 | C1 | **Handler throws halfway**, after sending some messages. A partially applied step is a state that never existed. | ✅ Effects buffered; a failed handler applies nothing. |
 | C2 | **Context escapes its handler** (stored in a closure, used later): effects at the wrong time. | ✅ Context expires; use throws `ProtocolViolationError`. |
-| C3 | **Handler never returns** (`while(true)`). | 🟡 Cannot be interrupted in-thread. CP6: the Worker has a wall-clock watchdog; the result is "aborted", explicitly *not* a reproducible outcome. |
+| C3 | **Handler never returns** (`while(true)`). | 🟡 Cannot be interrupted in-thread. CP5: the Worker has a wall-clock watchdog; the result is "aborted", explicitly *not* a reproducible outcome. |
 | C4 | **Async handler.** A Promise returned as state. | ✅ Rejected (not a plain object). |
-| C5 | **Protocol uses ambient nondeterminism** (`Math.random`, `Date`, module globals). | 🟡 Contract + documentation in CP0. CP6: stub `Math.random`/`Date` inside the worker to throw. CP11: real sandbox. |
+| C5 | **Protocol uses ambient nondeterminism** (`Math.random`, `Date`, module globals). | 🟡 Contract + documentation in CP0. CP5: stub `Math.random`/`Date` inside the worker to throw. CP10: real sandbox. |
 | C6 | **Flood:** exponential message growth exhausts memory before `maxEvents` triggers. | ✅ `maxPendingEvents`, plus a per-handler effect cap. |
 | C7 | **Error messages containing stack traces / paths**, making traces machine-specific. | ✅ Only `name: message` is recorded. |
 | C8 | **Engine bugs swallowed as protocol errors.** | ✅ Only the handler call is wrapped in try/catch; `EngineInvariantError` from engine code propagates. |
@@ -58,10 +63,10 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | # | Failure mode | Status / handling |
 |---|---|---|
 | E1 | **Trace entries mutated after the fact** (by UI code). | ✅ Entries frozen; `trace` getter returns a frozen copy. |
-| E2 | **Snapshot misses execution-relevant state.** Restoring from it diverges. Classic misses: scheduler `nextSeq`, PRNG states, per-node counters, cancelled-but-in-heap events, pending timer map. | 🔜 CP4: snapshot = all of those. Metamorphic test: `run(N) ≡ restore(snapshot@k) + run(N−k)` for random k. |
-| E3 | **Trace size.** Full-state `state.update` entries grow with state size × steps. | 🟡 Structural sharing makes in-memory cost proportional to *changes*. Serialised size is larger. CP10: chunking/diff encoding. |
+| E2 | **Snapshot misses execution-relevant state.** Restoring from it diverges. Classic misses: scheduler `nextSeq`, PRNG states, per-node counters, cancelled-but-in-heap events, pending timer map, and since CP1 node incarnations, persistent storage, `crashedAt`, the active partition and link conditions. | 🔜 CP3: snapshot = all of those. Metamorphic test: `run(N) ≡ restore(snapshot@k) + run(N−k)` for random k. |
+| E3 | **Trace size.** Full-state `state.update` entries grow with state size × steps. | 🟡 Structural sharing makes in-memory cost proportional to *changes*. Serialised size is larger. CP9: chunking/diff encoding. |
 | E4 | **Golden hash updated without a version bump.** | 🟡 Process rule in the golden test and [TEST_STRATEGY](TEST_STRATEGY.md). |
-| E5 | **Cross-engine divergence** (V8 vs SpiderMonkey vs JavaScriptCore). | 🔜 CP6: Playwright runs the golden experiment in Chromium, Firefox and WebKit and compares fingerprints. |
+| E5 | **Cross-engine divergence** (V8 vs SpiderMonkey vs JavaScriptCore). | 🔜 CP5: Playwright runs the golden experiment in Chromium, Firefox and WebKit and compares fingerprints. |
 
 ## F. Future UI-specific hazards (recorded now so the design respects them)
 

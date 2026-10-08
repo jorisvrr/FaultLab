@@ -97,6 +97,22 @@ describe('determinism', () => {
   });
 
   /**
+   * CP0 compatibility: CP1 only ADDED information to fault-free traces (incarnations, the fault
+   * plan, the persistence model). Projecting a CP1 trace back onto the CP0 format must reproduce
+   * the CP0 golden fingerprint exactly, which proves scheduling, randomness and ordering are
+   * unchanged for runs without faults.
+   */
+  it('reproduces the CP0 golden fingerprint when projected onto the CP0 trace format', () => {
+    const projected = runSimulation(reference()).trace.map((entry) => {
+      const { incarnation: _incarnation, ...rest } = entry as typeof entry & { incarnation?: number };
+      if (rest.kind !== 'run.start') return rest;
+      const { persistence: _persistence, faults: _faults, ...start } = rest;
+      return { ...start, engineVersion: '0.1.0-cp0' };
+    });
+    expect(fingerprintTrace(projected as never)).toBe('62159051');
+  });
+
+  /**
    * GOLDEN TRACE. If this fails, the engine's observable behaviour changed. If the change is
    * intentional: bump ENGINE_VERSION, explain the change in the commit, and update the value.
    * If it is not intentional, you have found a determinism regression.
@@ -104,10 +120,10 @@ describe('determinism', () => {
   it('matches the golden fingerprint for the reference experiment', () => {
     const { trace, eventsProcessed, finalTime } = runSimulation(reference());
     expect({ engine: ENGINE_VERSION, eventsProcessed, finalTime, fingerprint: fingerprintTrace(trace) }).toEqual({
-      engine: '0.1.0-cp0',
+      engine: '0.2.0-cp1',
       eventsProcessed: 45,
       finalTime: 150,
-      fingerprint: '62159051',
+      fingerprint: 'd13876e0',
     });
   });
 });

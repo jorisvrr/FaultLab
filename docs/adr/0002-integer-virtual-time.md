@@ -9,7 +9,7 @@
 **Alternatives.**
 - *Float milliseconds:* natural to write, but inexact (see above).
 - *BigInt:* unbounded and exact, but slow, awkward in arithmetic, and not JSON-serialisable without custom encoding.
-- *Integer microseconds:* finer resolution, but traces become harder to read; nothing in CP0–CP5 needs sub-millisecond resolution. Changing the tick convention later only changes how the UI labels time.
+- *Integer microseconds:* finer resolution, but traces become harder to read; nothing in CP0–CP4 needs sub-millisecond resolution. Changing the tick convention later only changes how the UI labels time.
 
 **Trade-off.** Protocols cannot express sub-tick delays. With ≤ 2³¹ per delay and the default 100 000-event limit, time stays below ≈ 2⁴⁷·⁶, far from 2⁵³.
 
