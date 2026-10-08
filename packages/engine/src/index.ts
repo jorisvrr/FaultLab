@@ -1,0 +1,12 @@
+export { ENGINE_VERSION } from './version';
+export { ConfigError, EngineInvariantError, FaultLabError, InvalidJsonError, ProtocolViolationError } from './errors';
+export { isVirtualTime, VirtualClock, type Duration, type VirtualTime } from './time';
+export { canonicalJson, toFrozenJson, type JsonArray, type JsonObject, type JsonPrimitive, type JsonValue } from './json';
+export { deriveStream, Xoshiro128, type RandomSource, type Xoshiro128State } from './random';
+export { BinaryHeap } from './priority-queue';
+export { compareScheduled, EventScheduler, type EventSeq, type ScheduledEvent } from './scheduler';
+export { VirtualNetwork, type LatencyRange, type NetworkConfig, type RoutingDecision } from './network';
+export type { FiredTimer, IncomingMessage, MessageId, NodeContext, NodeId, Protocol, TimerId } from './protocol';
+export { DEFAULT_LIMITS, MAX_DELAY, MAX_NODES, resolveConfig, type Limits, type ResolvedConfig, type SimulationConfig } from './config';
+export { EventTrace, fingerprintTrace, serializeTrace, type StopReason, type TraceEntry, type TraceEntryKind } from './trace';
+export { runSimulation, Simulation, type RunResult } from './simulation';

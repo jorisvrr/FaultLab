@@ -1,0 +1,12 @@
+{
+  // Engine source. Deliberately compiled WITHOUT the DOM or Node type libraries:
+  // setTimeout, performance, console, process and fetch are compile errors here.
+  // This is one of the determinism guards described in docs/DETERMINISM.md.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,10 @@
+{
+  // Tests may use Node APIs (e.g. reading source files for architecture fitness tests).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}

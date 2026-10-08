@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Generated artefacts
+coverage/
+dist/
+build/
+.vitest/
+*.tsbuildinfo
+*.log
+
+# Environment files, secrets and credentials (FaultLab needs none; keep it that way)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+
+# Design reference material (third-party, never committed; see docs/DESIGN_DIRECTION.md §1.1)
+inspo/
+inspo.zip
+references/
+
+# OS and editor noise
+.DS_Store
+Icon?
+.idea/
+.vscode/*
+!.vscode/extensions.json

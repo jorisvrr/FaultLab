@@ -1,0 +1,27 @@
+{
+  "name": "faultlab",
+  "private": true,
+  "description": "Deterministic distributed-systems simulation and debugging environment for the browser.",
+  "license": "MIT",
+  "author": "Joris van Rijn",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "npm run test --workspace @faultlab/engine",
+    "coverage": "npm run coverage --workspace @faultlab/engine",
+    "typecheck": "npm run typecheck --workspace @faultlab/engine",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "@vitest/coverage-v8": "^5.0.3",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
