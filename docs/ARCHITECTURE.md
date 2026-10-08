@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: CP1. This document describes what exists **and** the planned shape, and marks which is which.
+> Status: CP2. This document describes what exists **and** the planned shape, and marks which is which.
 
 ## 1. Goals that shape the architecture
 
@@ -24,7 +24,7 @@
 └────────┼──────────────────────────────────────────────────────────────────┘
          │ plain function calls
 ┌────────▼──────────────────────────────────────────────────────────────────┐
-│ packages/engine  (CP1 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
+│ packages/engine  (CP2 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
 │                                                                           │
 │   Simulation ──► EventScheduler ──► BinaryHeap        VirtualClock        │
 │      │   │       (time, seq) order; compaction                            │
@@ -33,10 +33,13 @@
 │      ├──► NodeRuntime × N: lifecycle, incarnation, timers, storage        │
 │      │      └──► NodeContext (buffered effects + storage) ──► Protocol    │
 │      ├──► Fault plan (data, scheduled up front) ──► fault dispatch        │
-│      ├──► EventTrace (append-only, frozen entries, causal links)          │
-│      └──► resolveConfig / resolveFaults / toFrozenJson (trust boundaries) │
+│      ├──► EventTrace (append-only, deep-frozen entries, causal links)     │
+│      ├──► InvariantMonitor ◄── frozen SimulationView + StepInfo (per step)│
+│      │      └──► invariant.violation / .cleared / .error entries          │
+│      ├──► in-flight message index (send order)                            │
+│      └──► resolveConfig / resolveFaults / resolveInvariants / toFrozenJson│
 │                                                                           │
-│   later: InvariantChecker (CP2) · Snapshot (CP3)                          │
+│   later: Snapshot (CP3) · bounded liveness (CP4)                          │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,9 +64,11 @@ The brief proposed eleven candidate modules. They are **files with clear respons
 | protocol-api | `protocol.ts` (types incl. `NodeStorage`) and `context.ts` (per-handler context, effect buffer, storage overlay) | CP0 ✅, CP1 ✅ |
 | fault-injection | `faults.ts` — fault plan types, validation and normalisation; applied by `simulation.ts` | CP1 ✅ |
 | event-trace | `trace.ts` — entry types, append-only `EventTrace`, canonical serialisation | CP0 ✅ |
-| invariant-checker | `invariants.ts` — predicates over global state after each step | CP2 |
-| test-fixtures | `fixtures/` — `createPingProtocol`, `echoForever`, `createHeartbeatProtocol` (exported as `@faultlab/engine/fixtures`) | CP0 ✅, CP1 ✅ |
+| invariant-checker | `invariants.ts` — `Invariant` contract, validation, `InvariantMonitor` (history, episodes, policies); the frozen view is built in `simulation.ts` | CP2 ✅ |
+| test-fixtures | `fixtures/` — `createPingProtocol`, `echoForever`, `createHeartbeatProtocol`, `createNaiveLeaderProtocol` + its five invariants (exported as `@faultlab/engine/fixtures`) | CP0 ✅, CP1 ✅, CP2 ✅ |
 | *(added)* trust boundaries | `config.ts`, `faults.ts`, `validation.ts` (config/fault validation), `json.ts` (payload/state validation + freezing) | CP0 ✅, CP1 ✅ |
+
+**Separation of concerns in CP2.** Invariants observe; they cannot act. They receive a deeply frozen view and the step's frozen entries, and their only outputs are a verdict and their own JSON history, both validated by the engine. Fault exploration and shrinking live in test code (`test/explore.ts`), so the engine gains no dependency.
 
 **Separation of concerns in CP1.** Protocols cannot inject faults: there is no API for it. Faults enter only through the configuration. The network knows partitions and link conditions but not node lifecycles. `NodeRuntime` knows lifecycles but not the network. The trace records both, and the future UI reads only the trace.
 
@@ -89,7 +94,9 @@ step():
        setTimer   → timer.set entry → schedule fire (tagged with the incarnation)
        cancelTimer→ cancel in scheduler (may compact) → timer.cancel entry (only if it was pending)
   8. if state changed (reference inequality) → state.update entry
-  9. pending events > maxPendingEvents? → stop
+  9. invariants (if configured): build the frozen view, evaluate in config order,
+     append violation / cleared / error entries → stop if required (ADR-0013)
+ 10. pending events > maxPendingEvents? → stop
 ```
 
 ## 5. Planned boundaries (not built yet)

@@ -26,10 +26,12 @@ This is the specification of what the engine does. Where the code and this docum
   network: { latency: { min, max } } // 0 <= min <= max <= 2^31, integers
   limits?: { maxEvents?, maxTime?, maxPendingEvents? }
   faults?: FaultSpec[]               // the fault plan (§8), up to 10 000 entries
+  invariants?: Invariant[]           // safety checkers (§10), up to 64, evaluated in this order
+  invariantPolicy?: 'stop-on-first' | 'record-and-continue'   // default 'stop-on-first'
 }
 ```
 
-Defaults: `maxEvents = 100 000`, `maxTime = null` (none), `maxPendingEvents = 100 000`, `faults = []`. Node order determines start order, `ctx.peers` order and `broadcast` order. Invalid input throws `ConfigError` with a path (`"network.latency.max"`, `"faults[3].groups[0][1]"`) **before** anything runs. Unknown fields are rejected at every level, so a typo can't be silently ignored. Node starts plus plan faults must fit in `maxPendingEvents`.
+Defaults: `maxEvents = 100 000`, `maxTime = null` (none), `maxPendingEvents = 100 000`, `maxViolations = 100`, `faults = []`, `invariants = []`. Node order determines start order, `ctx.peers` order and `broadcast` order. Invalid input throws `ConfigError` with a path (`"network.latency.max"`, `"faults[3].groups[0][1]"`) **before** anything runs. Unknown fields are rejected at every level, so a typo can't be silently ignored. Node starts plus plan faults must fit in `maxPendingEvents`.
 
 ### 1.2 Protocol API
 
@@ -110,7 +112,7 @@ Every entry has `index` (dense, 0-based, never changes), `time`, `cause`, and `k
 
 | Kind | Extra fields | `cause` points to |
 |---|---|---|
-| `run.start` | `engineVersion, protocol{name,version}, seed, nodes, latency, limits, persistence, faults` | `null` |
+| `run.start` | `engineVersion, protocol{name,version}, seed, nodes, latency, limits, persistence, faults, invariants[{id,version,name}], invariantPolicy` | `null` |
 | `node.start` | `node, incarnation` (=1) | `run.start` |
 | `message.send` | `node` (sender), `incarnation, to, messageId, payload, deliverAt` (`null` if dropped at send) | handler's triggering entry |
 | `message.deliver` | `node` (receiver), `incarnation, from, messageId, payload` | its `message.send` |
@@ -128,6 +130,9 @@ Every entry has `index` (dense, 0-based, never changes), `time`, `cause`, and `k
 | `link.fault` | `faultId, from, to, loss, delay` | `run.start` |
 | `link.restore` | `faultId, from, to` | `run.start` |
 | `fault.skipped` | `faultId, faultType, node, reason` (`already-crashed` / `not-crashed`) | `run.start` |
+| `invariant.violation` | `violationId, invariant{id,version,name}, nodes, expected, observed, evidence, references, trigger, step{first,last}, nodeStates, activeFaults, eventNumber` (§10.4) | the step's trigger |
+| `invariant.cleared` | `violationId, invariant` (record-and-continue only) | the step's trigger |
+| `invariant.error` | `invariant, error` | the step's trigger |
 | `run.end` | `reason, eventsProcessed, pendingEvents` | `null` |
 
 **Within one step** the order is: triggering entry → `storage.write` (if any; durable before anything leaves) → effect entries in call order (a send dropped at send time is followed immediately by its `message.drop`) → `state.update` (if the state changed). A failed step produces the triggering entry → `protocol.error`, and nothing else.
@@ -140,7 +145,7 @@ Every entry has `index` (dense, 0-based, never changes), `time`, `cause`, and `k
 - Every `message.deliver` happens at its send's `deliverAt` and matches its send's sender, receiver, and payload.
 - Every sent message is delivered or dropped **exactly once**, or is still pending when the run stops.
 - Every plan fault yields exactly one entry (applied or skipped).
-- Entries and everything reachable from them are deeply frozen and JSON-serialisable.
+- Entries and everything reachable from them are deeply frozen and JSON-serialisable. (Before CP2 entries were only *shallowly* frozen, so nested arrays such as `cancelledTimers` were mutable. Found by the CP2 graph-walk test and fixed in `EventTrace.append`.)
 
 ## 4. Termination and limits
 
@@ -152,8 +157,9 @@ Every entry has `index` (dense, 0-based, never changes), `time`, `cause`, and `k
 
 After dispatching:
 
-4. Handler failed → stop `protocol-error`.
-5. Live events `> maxPendingEvents` → stop `pending-limit`.
+4. Handler failed → stop `protocol-error` (invariants are not evaluated for a failed step).
+5. Invariants evaluated (§10): checker error → `invariant-error`; new violation under `stop-on-first` → `invariant-violation`; `maxViolations` reached → `violation-limit`.
+6. Live events `> maxPendingEvents` → stop `pending-limit`.
 
 Additionally, one handler may not buffer more than `maxPendingEvents` effects (a `ProtocolViolationError`), so a single runaway loop of `send` calls is bounded too.
 
@@ -229,3 +235,65 @@ At **delivery**:
 3. Otherwise delivered to the receiver's *current* incarnation.
 
 Consequences: a new partition cuts messages already in flight, and a partition that heals before arrival does not. Link changes (`link`, `link-restore`) never affect messages in flight. A sender's crash doesn't recall what it already sent. Every drop records `conditionIndex`, the entry of the partition, link fault or crash that caused it.
+
+## 10. Invariants (CP2)
+
+Design: [ADR-0012](adr/0012-invariant-model.md), [ADR-0013](adr/0013-violation-policies.md).
+
+### 10.1 Contract
+
+```ts
+interface Invariant<H extends JsonValue> {
+  id: string; version: string; name: string;
+  initialHistory: H;                         // null for state invariants
+  check({ view, step, history }): { ok: true, history? } | { ok: false, history?, violation: ViolationReport }
+}
+```
+
+Invariants are trusted, synchronous and deterministic (the same rules as protocols). A **state invariant** looks only at the current `view`. A **historical invariant** also carries `history`: explicit JSON owned by the engine, validated and frozen after every check, readable via `sim.invariantHistory(id)`, and part of the execution state future snapshots must capture. Bump `version` whenever the rule or the shape of its history changes.
+
+### 10.2 What an invariant sees
+
+- `view`: `time`, `eventNumber`, `nodes[]` (id, status, incarnation, `state`, `storage`, `stateEntry`) in configuration order, `node(id)`, `inFlight[]` (§11), `network` (partition groups, active directed link conditions).
+- `step`: `trigger` (the first entry of the step) and `entries` (everything the step appended).
+- Everything reachable is **deeply frozen at runtime**: payloads and states already were; storage maps, in-flight records and network conditions are frozen copies built lazily per step; no engine object is reachable. Writes throw `TypeError` (recorded as `invariant.error`); `Reflect.set` silently returns `false`. Either way the simulation is unaffected.
+
+### 10.3 Evaluation order
+
+After every committed step (handler steps, fault steps, drop-only steps): evaluate invariants **in configuration order**; append their outcomes in that order (violations, `invariant.cleared`, `invariant.error`); then apply the stop rules of §4 step 5. History is updated only by a well-formed verdict; a checker error leaves its history unchanged.
+
+**Policies.** `stop-on-first` (default): the run stops after the first step with a violation, recording every violation of that step. `record-and-continue`: one `invariant.violation` per **episode** (holding → failing), closed by `invariant.cleared` (failing → holding); a failure that persists over many steps produces one entry. A checker error always stops the run.
+
+### 10.4 Explainable violation record
+
+The invariant asserts `nodes`, `expected`, `observed`, `evidence` (JSON) and `references` (earlier trace indices). The engine adds observed facts only: `trigger` (= `cause`), the `step` range, `nodeStates` (status, incarnation, and the entry that produced each cited node's state), `activeFaults` (trace indices of the active partition, link faults and crashes) and `eventNumber`. No field claims a cause. Inputs for an exact replay are all in `run.start`; replaying them for `eventNumber` events reproduces the state at detection.
+
+### 10.5 Liveness
+
+Not checked in CP2. Bounded liveness ("a leader exists by t=…") is planned for CP4 as a separate kind of check with deadlines, reported separately from safety violations.
+
+## 11. In-flight message index
+
+`sim.inFlight()` and `view.inFlight` list every message that has been sent, was not dropped at send time, and has not yet been delivered or dropped at delivery, **in send order**. Each record: `id, from, to, payload, sentAt, deliverAt, sendIndex`.
+
+| Event | Index update |
+|---|---|
+| send, routed for delivery | add (when the delivery event is scheduled) |
+| send, dropped at send (`partitioned`, `lost`) | never added |
+| delivery event dispatched (delivered, `partitioned-in-flight`, `node-down`) | removed |
+| fault transitions (partition, heal, link changes, crash, recover) | no direct change; the effect shows at delivery |
+| run stops | unchanged: it lists exactly the undelivered messages |
+
+Index invariants (property-tested after every step over random fault plans): the index equals the set of live `message.deliver` events in the scheduler, equals the set derived from the trace, matches each message's `message.send` entry field for field, and never contains an overdue message (`deliverAt ≥ now`).
+
+## 12. Trace format history
+
+Engine versions change the trace format only by **adding** information. `test/legacy.ts` projects a current trace onto an older format; the CP0 and CP1 golden fingerprints are reproduced exactly when the newer features are unused.
+
+| Engine version | Added |
+|---|---|
+| `0.1.0-cp0` | Initial format |
+| `0.2.0-cp1` | `incarnation` on node entries; `run.start.persistence`, `run.start.faults`; `message.send.deliverAt` may be `null`; entries `message.drop`, `storage.write`, `node.crash`, `node.recover`, `network.partition`, `network.heal`, `link.fault`, `link.restore`, `fault.skipped` |
+| `0.3.0-cp2` | `run.start.invariants`, `run.start.invariantPolicy`, `run.start.limits.maxViolations`; entries `invariant.violation`, `invariant.cleared`, `invariant.error`; stop reasons `invariant-violation`, `invariant-error`, `violation-limit`; all entries deeply frozen |
+
+Configurations from earlier versions remain valid; every new config field is optional.

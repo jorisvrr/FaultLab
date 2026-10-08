@@ -38,12 +38,25 @@ export interface LinkCondition {
   readonly delay: LatencyRange;
 }
 
+/** Snapshot of the active network conditions; `since` is the trace index of the establishing fault. */
+export interface NetworkConditions {
+  readonly partition: { readonly groups: readonly (readonly NodeId[])[]; readonly since: number } | null;
+  readonly links: readonly {
+    readonly from: NodeId;
+    readonly to: NodeId;
+    readonly loss: number;
+    readonly delay: LatencyRange;
+    readonly since: number;
+  }[];
+}
+
 interface ActiveLink extends LinkCondition {
   /** Trace index of the `link.fault` entry that set this condition. */
   readonly since: number;
 }
 
 interface ActivePartition {
+  readonly groups: readonly (readonly NodeId[])[];
   readonly groupOf: ReadonlyMap<NodeId, number>;
   /** Trace index of the `network.partition` entry. */
   readonly since: number;
@@ -76,7 +89,7 @@ export class VirtualNetwork {
   partition(groups: readonly (readonly NodeId[])[], since: number): void {
     const groupOf = new Map<NodeId, number>();
     groups.forEach((group, g) => group.forEach((id) => groupOf.set(id, g)));
-    this.#partition = { groupOf, since };
+    this.#partition = { groups, groupOf, since };
   }
 
   heal(): void {
@@ -106,6 +119,24 @@ export class VirtualNetwork {
     let latency = this.#random.nextInt(min, max);
     if (link !== undefined && link.delay.max > 0) latency += this.#random.nextInt(link.delay.min, link.delay.max);
     return { kind: 'deliver', deliverAt: now + latency };
+  }
+
+  /**
+   * Read-only description of every active condition, with the trace index of the fault entry
+   * that established it. Used for invariant views and violation records. Returns fresh, frozen
+   * data; nothing in it aliases the network's internal maps.
+   */
+  conditions(): NetworkConditions {
+    const partition = this.#partition;
+    return Object.freeze({
+      partition: partition === null ? null : Object.freeze({ groups: partition.groups, since: partition.since }),
+      links: Object.freeze(
+        [...this.#links].map(([key, link]) => {
+          const [from, to] = key.split('>') as [NodeId, NodeId];
+          return Object.freeze({ from, to, loss: link.loss, delay: link.delay, since: link.since });
+        }),
+      ),
+    });
   }
 
   /** At delivery time: the trace index of the partition that now separates the pair, or null. */

@@ -5,7 +5,7 @@
 1. **Test the specification, not the implementation.** [SEMANTICS.md](SEMANTICS.md) is the spec; tests assert its rules.
 2. **Every rule gets a negative test.** If the engine must reject something, a test proves that it does.
 3. **Prefer exact oracles.** Reference implementations (C, published vectors), reference models (sorted array, stable sort), and exact counts beat "looks plausible".
-4. **Randomise inputs, fix seeds.** Property tests explore; statistical tests use fixed seeds so they can never flake.
+4. **Randomise inputs, fix seeds.** Property tests explore with a fixed global fast-check seed (`test/setup.ts`), so the suite gives the same verdict on every run; `npm run test:explore` re-runs them with fresh random seeds. Statistical tests use fixed seeds so they can never flake.
 5. **A test that cannot fail is not a test.** Critical tests are checked by deliberately breaking the code (mutation sanity checks, below).
 6. **Coverage is a signal, not a target.**
 
@@ -15,6 +15,10 @@
 |---|---|---|---|
 | Unit (example-based) | Vitest | Each module's documented behaviour and edge cases | `test/*.test.ts` |
 | Property-based | fast-check | Heap = sorted model under interleaved ops; scheduler = stable sort by time; compaction = reference model; PRNG bounds and reproducibility; JSON round-trip; determinism over arbitrary configs; **random fault plans** (invariants, message conservation, replay determinism, step = run, storage consistency) | `priority-queue`, `scheduler`, `random`, `json`, `determinism`, `faults.property` tests |
+| Invariant engine | Vitest | Evaluation coverage (every step exactly once), runtime immutability (graph walk), 11 contained mutation attempts, history, policies, ordering, explainable records, 12 config rejections | `invariants-engine.test.ts` |
+| Fault exploration | fast-check + greedy minimiser | Random fault plans → violation → shrink → 1-minimal → replay; stored counterexample fixtures replayed exactly | `explore.ts`, `exploration.test.ts`, `counterexamples.test.ts` |
+| Protocol safety | Vitest + fast-check | Naive leader: healthy convergence (no startup false positives), crash/recover property, split brain, history-only violations, pure-function unit tests of invariants | `naive-leader.test.ts` |
+| Index consistency | fast-check | In-flight index = scheduler = trace-derived set after every step | `inflight.test.ts` |
 | Trace oracle | Plain TypeScript, no engine code | An independent re-derivation of lifecycle, timer, message and partition semantics from the trace alone; returns every violated rule. A bug would have to be written twice, the same way, to pass | `test/invariants.ts`, used by lifecycle, network and property tests |
 | Reference vectors | C reference, published FNV vectors | PRNG and hash are bit-exact implementations of their algorithms | `random.test.ts`, `hash.test.ts`, `test/reference/xoshiro128.c` |
 | Acceptance | Vitest | CP0 and CP1 criteria end-to-end with exact expected counts, times, orderings and ids | `simulation`, `lifecycle`, `network-faults` tests |
@@ -91,6 +95,62 @@ npm run check      # typecheck (src with no DOM/Node libs, tests with Node types
 npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
+
+## CP2 results
+
+313 tests passing (+2 fixture writers that run only in update mode) in 18 files; suite runtime ≈ 4.3 s. Coverage: 98.6% lines, 96.1% branches.
+
+### Findings made by the CP2 tests
+
+1. **Shallow freezing (CP0/CP1 bug).** The graph-walk immutability test found that trace entries were only frozen at the top level (`node.crash.cancelledTimers`, `run.start.protocol` were mutable). Fixed in `EventTrace.append` (deep freeze); regression test added; verified to fail on the old code.
+2. **Volatile epochs (protocol bug).** The crash/recover property test found that the first naive-leader draft reused epoch 1 after every node had crashed. Fixed by persisting the epoch; pinned as a regression test.
+3. **Persistence is not enough without a quorum (protocol weakness).** A 3 000-plan stress run found that epochs can still be reused when the only nodes that know the latest one are down. Kept as a documented weakness with a dedicated test; `single-leader` held for all 4 000 crash-only plans in a separate run.
+4. **Test hygiene.** fast-check used a fresh random seed per run (now fixed globally); `inflight.test.ts` imported a test file and silently ran its 10 tests twice (shared arbitraries moved to `test/arbitraries.ts`; the earlier interim count of 322 was inflated, the real count was 312).
+
+### Exploration results (fast-check seed 424242, 500 runs max)
+
+| Target invariant | Runs to first failure | First failing plan | Shrink steps | Minimised plan | Violation |
+|---|---|---|---|---|---|
+| `single-leader` | 1 | 3 faults | 2 | 1 fault: partition `[n3]` at t=150 | t=209, n3 + n4 |
+| `unique-leader-per-epoch` | 19 | 10 faults | 28 | 2 faults: partition `[n3]` at 150, partition `[n3,n4]` at 196 | t=249, epoch 2 led by n3, then n2 |
+
+Both are 1-minimal (verified), stored in `test/counterexamples/`, and replay to fingerprints `c5be175f` and `9e7ae94a`. Regenerate deliberately with `FAULTLAB_UPDATE_COUNTEREXAMPLES=1 npx vitest run test/exploration.test.ts`.
+
+### Runtime-verification overhead
+
+Workload: naive leader election, 8 nodes, healthy network, 100 000 events (287 533 trace entries), no invariant ever fails. Configurations interleaved round-robin after a warm-up; 15 runs each, two independent passes.
+
+| Invariants | Median (pass 1 / pass 2) | p25–p75 | Min–max |
+|---|---|---|---|
+| 0 | 525 / 504 ms | 501–556 ms | 493–649 ms |
+| 1 (`single-leader`) | 1 137 / 1 127 ms | 1 120–1 160 ms | 1 101–1 235 ms |
+| 5 (all naive-leader invariants) | 2 637 / 2 677 ms | 2 529–2 815 ms | 2 453–2 879 ms |
+
+Decomposition (9 interleaved runs each): no invariants 528 ms; one invariant that does nothing 1 026 ms; `single-leader` 1 166 ms. So **≈ 5 µs per step is engine-side view construction**, paid once per step regardless of how many invariants run, and the `single-leader` check itself costs ≈ 1.4 µs per step. Not optimised in CP2 (tracked as **PERF-2**, ROADMAP CP9). Zero-invariant runs skip view construction entirely; their overhead versus CP1 was not separately A/B-measured.
+
+### CP2 mutation sanity checks
+
+| Mutation | Tests failing |
+|---|---|
+| C1 invariants evaluated in reverse order | 2 |
+| C2 no episode de-duplication | 4 |
+| C3 no `invariant.cleared` entries | 2 |
+| C4 checker errors do not stop the run | 23 |
+| C5 node views not frozen | 2 |
+| C6 history neither copied nor frozen | 2 |
+| C7 delivered messages stay in the in-flight index | 7 |
+| C8 cited references not validated | 2 |
+| C9 active partition not reported | 3 |
+| C10 state provenance not tracked | 5 |
+| C11 stop-on-first ignores violations | 6 |
+| C12 `maxViolations` not enforced | 1 |
+| C13 evidence not validated as JSON | 1 |
+| C14 naive leader claims without the startup delay | 18 |
+| C15 naive leader epoch not persisted | 1 |
+| C16 leader does not step down for a higher node | 3 |
+| C17 historical invariant forgets its history | 8 |
+
+All 17 caught (counts from the suite before the duplicate-import fix and the extra unit tests; the verdicts are what matter).
 
 ## CP1 results
 

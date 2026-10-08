@@ -18,6 +18,11 @@ export class BinaryHeap<T> {
     return this.#items.length;
   }
 
+  /** Visit every item in internal array order (NOT sorted order). */
+  forEach(visit: (item: T) => void): void {
+    this.#items.forEach((item) => visit(item));
+  }
+
   peek(): T | undefined {
     return this.#items[0];
   }

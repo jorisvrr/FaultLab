@@ -38,6 +38,8 @@ export class NodeRuntime {
   // Protocol state.
   /** Volatile: undefined until init has run, and again after a crash. */
   state: JsonValue | undefined = undefined;
+  /** Trace index of the `state.update` that produced `state` (provenance for violation records). */
+  stateEntry: number | null = null;
   /** Persistent: survives crashes. Written only by committed steps (sync-on-commit). */
   readonly storage = new Map<string, JsonValue>();
 
@@ -53,6 +55,7 @@ export class NodeRuntime {
     this.incarnation++;
     this.crashedAt = null;
     this.state = undefined;
+    this.stateEntry = null;
   }
 
   /**
@@ -65,6 +68,7 @@ export class NodeRuntime {
     this.timers.clear();
     this.status = 'crashed';
     this.state = undefined;
+    this.stateEntry = null;
     return pending;
   }
 }

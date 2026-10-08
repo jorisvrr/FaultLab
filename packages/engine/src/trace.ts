@@ -2,6 +2,8 @@ import type { Fault, FaultId, FaultType } from './faults';
 import { fnv1a32, toHex32 } from './hash';
 import { canonicalJson, type JsonValue } from './json';
 import type { DropReason, LatencyRange } from './network';
+import type { InvariantPolicy, InvariantRef } from './invariants';
+import type { NodeStatus } from './node';
 import type { MessageId, NodeId, TimerId } from './protocol';
 import type { Duration, VirtualTime } from './time';
 
@@ -15,7 +17,13 @@ export type StopReason =
   /** More than `limits.maxPendingEvents` events were queued at once. */
   | 'pending-limit'
   /** A protocol handler threw or misused the node API. */
-  | 'protocol-error';
+  | 'protocol-error'
+  /** An invariant failed under the `stop-on-first` policy (ADR-0013). */
+  | 'invariant-violation'
+  /** An invariant checker threw or returned a malformed verdict. */
+  | 'invariant-error'
+  /** `limits.maxViolations` violations were recorded under `record-and-continue`. */
+  | 'violation-limit';
 
 interface EntryBase {
   /** Position in the trace. Entries are append-only, so this never changes. */
@@ -42,11 +50,19 @@ export interface RunStartEntry extends EntryBase {
   readonly seed: number;
   readonly nodes: readonly NodeId[];
   readonly latency: { readonly min: Duration; readonly max: Duration };
-  readonly limits: { readonly maxEvents: number; readonly maxTime: VirtualTime | null; readonly maxPendingEvents: number };
+  readonly limits: {
+    readonly maxEvents: number;
+    readonly maxTime: VirtualTime | null;
+    readonly maxPendingEvents: number;
+    readonly maxViolations: number;
+  };
   /** Persistence model in force (ADR-0008). */
   readonly persistence: 'sync-on-commit';
   /** The complete, normalised fault plan. */
   readonly faults: readonly Fault[];
+  /** Invariants checked after every step, in evaluation order (ADR-0012). */
+  readonly invariants: readonly InvariantRef[];
+  readonly invariantPolicy: InvariantPolicy;
 }
 
 export interface NodeStartEntry extends NodeEntryBase {
@@ -172,6 +188,55 @@ export interface FaultSkippedEntry extends FaultEntryBase {
   readonly reason: 'already-crashed' | 'not-crashed';
 }
 
+/**
+ * An invariant started failing (ADR-0013). `cause` = `trigger` = the first entry of the step after
+ * which the failure was detected. Fields under "engine facts" are observations recorded by the
+ * engine; the rest is asserted by the invariant. No field states an inferred cause.
+ */
+export interface InvariantViolationEntry extends EntryBase {
+  readonly kind: 'invariant.violation';
+  /** "v1", "v2", … in order of detection. */
+  readonly violationId: string;
+  readonly invariant: InvariantRef;
+  /** Nodes the invariant names as involved (validated against the configured nodes). */
+  readonly nodes: readonly NodeId[];
+  readonly expected: string;
+  readonly observed: string;
+  /** Structured evidence supplied by the invariant. */
+  readonly evidence: JsonValue;
+  /** Earlier trace entries the invariant cites as evidence (validated indices). */
+  readonly references: readonly number[];
+  // ── engine facts ──
+  readonly trigger: number;
+  /** Trace range [first, last] of the step after which the failure was detected. */
+  readonly step: { readonly first: number; readonly last: number };
+  /** For each cited node: its lifecycle position and the entry that produced its current state. */
+  readonly nodeStates: readonly {
+    readonly node: NodeId;
+    readonly status: NodeStatus;
+    readonly incarnation: number;
+    readonly stateEntry: number | null;
+  }[];
+  /** Fault entries whose effects were active at that moment (partition, link faults, crashes). */
+  readonly activeFaults: { readonly partition: number | null; readonly links: readonly number[]; readonly crashed: readonly number[] };
+  /** Number of dispatched events at detection: replaying `run.start`'s inputs this far reproduces it. */
+  readonly eventNumber: number;
+}
+
+/** Under `record-and-continue`: the invariant holds again; its violation episode is closed. */
+export interface InvariantClearedEntry extends EntryBase {
+  readonly kind: 'invariant.cleared';
+  readonly violationId: string;
+  readonly invariant: InvariantRef;
+}
+
+/** The checker itself failed (threw or returned a malformed verdict). Always stops the run. */
+export interface InvariantErrorEntry extends EntryBase {
+  readonly kind: 'invariant.error';
+  readonly invariant: InvariantRef;
+  readonly error: string;
+}
+
 export interface RunEndEntry extends EntryBase {
   readonly kind: 'run.end';
   readonly reason: StopReason;
@@ -198,6 +263,9 @@ export type TraceEntry =
   | LinkFaultEntry
   | LinkRestoreEntry
   | FaultSkippedEntry
+  | InvariantViolationEntry
+  | InvariantClearedEntry
+  | InvariantErrorEntry
   | RunEndEntry;
 
 export type TraceEntryKind = TraceEntry['kind'];
@@ -218,7 +286,7 @@ export class EventTrace {
 
   append(entry: NewTraceEntry): number {
     const index = this.#entries.length;
-    this.#entries.push(Object.freeze({ index, ...entry }) as TraceEntry);
+    this.#entries.push(deepFreeze({ index, ...entry }) as TraceEntry);
     return index;
   }
 
@@ -226,10 +294,30 @@ export class EventTrace {
     return this.#entries[index];
   }
 
+  /** Frozen copy of the entries from `start` to the end. */
+  slice(start: number): readonly TraceEntry[] {
+    return Object.freeze(this.#entries.slice(start));
+  }
+
   /** A frozen copy of the entries; later appends do not affect it. */
   snapshot(): readonly TraceEntry[] {
     return Object.freeze(this.#entries.slice());
   }
+}
+
+/**
+ * Freeze an entry and everything it contains. Objects that are already frozen are not visited
+ * again: every frozen object the engine produces (payloads, states, config parts, fault plans)
+ * is frozen bottom-up, so it is already deep. This keeps the cost proportional to the new
+ * containers an entry adds (found in CP2: `cancelledTimers` and `run.start.protocol` used to be
+ * left mutable by a shallow freeze).
+ */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /** Canonical serialisation of a trace. Two runs are identical iff these strings are equal. */

@@ -7,73 +7,9 @@ import { fingerprintTrace, serializeTrace } from '../src/trace';
 import { ENGINE_VERSION } from '../src/version';
 import { config, ofKind } from './helpers';
 import { checkTraceInvariants, storageFromTrace } from './invariants';
+import { projectTrace } from './legacy';
 
-const NODES = ['n1', 'n2', 'n3', 'n4'];
-
-/** Random fault plans. Crash/recover are weighted up so nodes actually flap. */
-const faultArb = (maxAt: number): fc.Arbitrary<FaultSpec> => {
-  const at = fc.integer({ min: 0, max: maxAt });
-  const node = fc.constantFrom(...NODES);
-  const link = fc.tuple(node, node).filter(([from, to]) => from !== to);
-  return fc.oneof(
-    { weight: 3, arbitrary: fc.record({ at, type: fc.constant('crash' as const), node }) },
-    { weight: 3, arbitrary: fc.record({ at, type: fc.constant('recover' as const), node }) },
-    {
-      weight: 2,
-      arbitrary: fc.record({
-        at,
-        type: fc.constant('partition' as const),
-        groups: fc.subarray(NODES, { minLength: 1, maxLength: NODES.length - 1 }).map((group) => [group]),
-      }),
-    },
-    { weight: 1, arbitrary: fc.record({ at, type: fc.constant('heal' as const) }) },
-    {
-      weight: 2,
-      arbitrary: fc
-        .record({
-          at,
-          link,
-          loss: fc.integer({ min: 0, max: 100 }).map((p) => p / 100),
-          delay: fc.tuple(fc.integer({ min: 0, max: 20 }), fc.integer({ min: 0, max: 30 })).map(([min, extra]) => ({ min, max: min + extra })),
-        })
-        .map(({ at, link: [from, to], loss, delay }) => ({ at, type: 'link' as const, from, to, loss, delay })),
-    },
-    { weight: 1, arbitrary: fc.record({ at, link }).map(({ at, link: [from, to] }) => ({ at, type: 'link-restore' as const, from, to })) },
-  );
-};
-
-/**
- * A crash followed by a recovery of the same node, possibly at the same tick (downFor = 0).
- * Without this, independently generated recoveries mostly hit running nodes and get skipped,
- * so incarnation edge cases would be under-tested.
- */
-const outageArb = (maxAt: number): fc.Arbitrary<FaultSpec[]> =>
-  fc
-    .record({ at: fc.integer({ min: 0, max: maxAt }), node: fc.constantFrom(...NODES), downFor: fc.oneof(fc.constant(0), fc.integer({ min: 1, max: 120 })) })
-    .map(({ at, node, downFor }) => [
-      { at, type: 'crash', node },
-      { at: at + downFor, type: 'recover', node },
-    ]);
-
-export const faultPlanArb = (maxAt: number): fc.Arbitrary<FaultSpec[]> =>
-  fc
-    .array(fc.oneof({ weight: 3, arbitrary: faultArb(maxAt).map((f) => [f]) }, { weight: 2, arbitrary: outageArb(maxAt) }), { maxLength: 20 })
-    .map((groups) => groups.flat());
-
-export const experiment = fc.record({
-  seed: fc.integer({ min: 0, max: 2 ** 32 - 1 }),
-  faults: faultPlanArb(400),
-  latencyMax: fc.integer({ min: 1, max: 25 }),
-});
-
-export const heartbeatConfig = ({ seed, faults, latencyMax }: { seed: number; faults: FaultSpec[]; latencyMax: number }) =>
-  config(createHeartbeatProtocol({ interval: 20, jitter: 5, timeout: 60 }), {
-    seed,
-    nodes: NODES,
-    faults,
-    network: { latency: { min: 1, max: latencyMax } },
-    limits: { maxTime: 500 },
-  });
+import { experiment, heartbeatConfig, NODES } from './arbitraries';
 
 describe('random fault plans (property-based)', () => {
   it('never violate the lifecycle and network invariants (heartbeat)', () => {
@@ -198,7 +134,7 @@ describe('CP1 golden trace', () => {
    * GOLDEN TRACE for a fault-heavy reference experiment. Same rule as the CP0 golden: if it
    * fails unintentionally you found a regression; if intentionally, bump ENGINE_VERSION.
    */
-  it('matches the golden fingerprint for the fault reference experiment', () => {
+  const faultReference = () => {
     const faults: FaultSpec[] = [
       { at: 50, type: 'link', from: 'n3', to: 'n4', loss: 0.3, delay: { min: 10, max: 40 } },
       { at: 100, type: 'crash', node: 'n2' },
@@ -209,13 +145,21 @@ describe('CP1 golden trace', () => {
       { at: 400, type: 'crash', node: 'n2' },
       { at: 400, type: 'recover', node: 'n2' },
     ];
-    const result = runSimulation(heartbeatConfig({ seed: 2026, faults, latencyMax: 15 }));
+    return runSimulation(heartbeatConfig({ seed: 2026, faults, latencyMax: 15 }));
+  };
+
+  it('reproduces the CP1 fingerprint when projected onto the CP1 trace format (invariants disabled)', () => {
+    expect(fingerprintTrace(projectTrace(faultReference().trace, '0.2.0-cp1') as never)).toBe('17b2dde2');
+  });
+
+  it('matches the golden fingerprint for the fault reference experiment', () => {
+    const result = faultReference();
     expect(checkTraceInvariants(result.trace)).toEqual([]);
     expect({
       engine: ENGINE_VERSION,
       eventsProcessed: result.eventsProcessed,
       drops: ofKind(result.trace, 'message.drop').length,
       fingerprint: fingerprintTrace(result.trace),
-    }).toEqual({ engine: '0.2.0-cp1', eventsProcessed: 295, drops: 59, fingerprint: '17b2dde2' });
+    }).toEqual({ engine: '0.3.0-cp2', eventsProcessed: 295, drops: 59, fingerprint: 'b10daf99' });
   });
 });

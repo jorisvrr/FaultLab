@@ -242,11 +242,23 @@ Implementation: CSS `cursor: url(cursor.svg) x y, auto` (rendered by the OS: zer
 | Fault editor / crash controls | Fault plan in the config; `node.crash`, `node.recover`, `fault.skipped` entries | Engine data: CP1 ✅ |
 | Partition view, drop markers, degraded links | `network.partition` / `network.heal`, `link.fault` / `link.restore`, `message.drop` (`reason`, `conditionIndex`) | Engine data: CP1 ✅ |
 | Node lifecycle and storage inspector | `incarnation` on node entries, `storage.write` | Engine data: CP1 ✅ |
-| Invariant panel | violation entries | CP2 |
+| Violation explainer (highlight nodes, jump to trigger, causal chain, expected vs. observed, replay) | `invariant.violation`: `nodes`, `trigger`, `step`, `nodeStates[].stateEntry`, `references`, `activeFaults`, `expected`, `observed`, `evidence`, `eventNumber`; inputs in `run.start` | Engine data: CP2 ✅ |
+| Violation timeline markers and episodes | `invariant.violation` / `invariant.cleared` pairs (record-and-continue) | Engine data: CP2 ✅ |
+| Invariant panel (list of checked invariants, status, history inspector) | `run.start.invariants`, violation/cleared/error entries; histories via the engine API | Engine data: CP2 ✅ |
 | Deep time travel (beyond streamed trace) | Snapshots | CP3 |
 | Protocol overlays (Raft role/term) | Protocol `describe(state)` view adapter | CP4 |
 
 Accessibility baseline for all of them: full keyboard operation (Space play/pause, ←/→ step, Shift ×10, `[`/`]` previous/next event of the selected node); visible focus rings in `--text-1`; a live region announcing stop reasons and violations; the graph always has a textual equivalent (node list + trace table).
+
+### 12.1 Violation explanations (from CP2 engine data)
+
+A violation view must keep **facts** and **inferences** visibly apart:
+
+- *Facts* (from the record): which rule failed, when, which nodes, expected vs. observed, the triggering event, the step, each node's state and where it came from, the faults active at that moment.
+- *Inferences* (computed by the UI, labelled as such): "candidate causes", e.g. an active partition that separates the cited nodes, found by walking `cause` and `conditionIndex` links. Never shown as certain.
+- *Replay*: "replay to here" re-runs `run.start`'s inputs for `eventNumber` events. No stored state is trusted.
+
+Visual treatment follows §5.4: ember for the violation marker and the affected nodes, with shape and text labels always present.
 
 ## 13. Phased visual implementation plan
 

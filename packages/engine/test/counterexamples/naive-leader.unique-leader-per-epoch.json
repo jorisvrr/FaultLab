@@ -1,0 +1,72 @@
+{
+  "format": "faultlab-counterexample/1",
+  "description": "naive-leader: two leaders of the same epoch over the run (found by fault exploration)",
+  "engineVersion": "0.3.0-cp2",
+  "protocol": {
+    "name": "naive-leader",
+    "version": "1",
+    "options": {
+      "interval": 20,
+      "jitter": 5,
+      "timeout": 60
+    }
+  },
+  "invariant": {
+    "id": "unique-leader-per-epoch",
+    "version": "1"
+  },
+  "config": {
+    "seed": 11,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 1000,
+    "faults": [
+      {
+        "at": 150,
+        "type": "partition",
+        "groups": [
+          [
+            "n3"
+          ]
+        ]
+      },
+      {
+        "at": 196,
+        "type": "partition",
+        "groups": [
+          [
+            "n3",
+            "n4"
+          ]
+        ]
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 424242,
+    "runsUntilFailure": 19,
+    "originalFaultCount": 10,
+    "shrinkSteps": 28,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 2
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 249,
+    "nodes": [
+      "n3",
+      "n2"
+    ],
+    "observed": "Epoch 2 was led by n3 and later also by n2",
+    "eventNumber": 142,
+    "fingerprint": "9e7ae94a"
+  }
+}

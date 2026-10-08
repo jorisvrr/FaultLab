@@ -1,6 +1,6 @@
 # Why FaultLab Simulations Are Deterministic
 
-**Claim.** For a fixed `ENGINE_VERSION`, protocol `name` + `version`, and configuration (seed, nodes, latency, limits, fault plan), every run produces the same trace, entry for entry, byte for byte after canonical serialisation. That holds on every machine and in every standards-compliant JavaScript engine.
+**Claim.** For a fixed `ENGINE_VERSION`, protocol `name` + `version`, and configuration (seed, nodes, latency, limits, fault plan, invariants and policy), every run produces the same trace, entry for entry, byte for byte after canonical serialisation. That holds on every machine and in every standards-compliant JavaScript engine.
 
 **Evidence.** `test/determinism.test.ts`: repeated runs compare equal; a property test over arbitrary seeds, latencies and node counts; stepping one event at a time equals `run()`; a golden fingerprint pins the reference experiment; and the engine is shown not to touch `Math.random`, `Date.now`, or `performance.now`.
 
@@ -23,9 +23,11 @@ A program is deterministic if every value it computes is a function of its input
 | 11 | **Configuration aliasing** | `resolveConfig` copies and freezes the config; mutating the caller's arrays after construction has no effect. | `config.test.ts` |
 | 12 | **Faults from outside the inputs** (CP1) | Faults exist only as the config's fault plan, recorded in `run.start`; protocols have no fault API; fault events are ordinary scheduled events in the same total order. | Fault replay property (random plans, identical traces); fault golden fingerprint |
 | 13 | **Randomness consumed by faults** (CP1) | Loss and extra delay draw from the network stream only while a condition is active; fault-free runs draw exactly as in CP0. | CP0-projection test reproduces the CP0 golden fingerprint |
+| 15 | **Invariant checking** (CP2) | Invariants see only a deeply frozen view and frozen step entries; their outputs (verdict, JSON history) are validated by the engine; evaluation order is fixed (configuration order); checker exceptions become trace entries; invariants are recorded in `run.start`. | Graph-walk immutability test; contained mutation attempts leave the trace prefix identical; checked vs. unchecked runs identical apart from `run.start` |
+| 16 | **Property-test seeds** (CP2) | fast-check uses a fixed global seed, so the *test suite itself* is deterministic; random seeds are opt-in via `npm run test:explore`. | Suite run three times with identical results |
 | 14 | **Heap maintenance** (CP1) | Compaction rebuilds the heap, but with a strict total order every valid heap pops identically, so the trace is unaffected. | Model-based compaction property; golden fingerprints |
 
-Given rows 1–14, each step is a pure function of (scheduler state, node runtimes, network conditions, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
+Given rows 1–16, each step is a pure function of (scheduler state, node runtimes, network conditions, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
 
 ## What determinism does *not* cover (yet)
 

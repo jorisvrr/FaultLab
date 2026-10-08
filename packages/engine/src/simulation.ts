@@ -2,6 +2,7 @@ import { resolveConfig, type ResolvedConfig, type SimulationConfig } from './con
 import { createNodeContext, type Effect, type StorageWrites } from './context';
 import { EngineInvariantError } from './errors';
 import type { Fault } from './faults';
+import { InvariantMonitor, type InFlightMessage, type NodeView, type SimulationView, type StepInfo } from './invariants';
 import { toFrozenJson, type JsonValue } from './json';
 import { VirtualNetwork, type DropReason } from './network';
 import { NodeRuntime, type NodeStatus } from './node';
@@ -62,13 +63,21 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
   readonly #trace = new EventTrace();
   readonly #network: VirtualNetwork;
   readonly #nodes = new Map<NodeId, NodeRuntime>();
+  /**
+   * In-flight message index (CP2): exactly the messages with a pending `message.deliver` event,
+   * in send order. Added when a delivery is scheduled; removed when that delivery event is
+   * dispatched (delivered or dropped). Nothing else ever schedules or cancels deliveries.
+   */
+  readonly #inFlight = new Map<MessageId, InFlightMessage>();
+  readonly #monitor: InvariantMonitor | null;
   #eventsProcessed = 0;
   #stopReason: StopReason | null = null;
 
   constructor(config: SimulationConfig<S, M>) {
     this.config = resolveConfig(config);
-    const { seed, nodes, protocol, network, limits, faults } = this.config;
+    const { seed, nodes, protocol, network, limits, faults, invariants, invariantPolicy } = this.config;
     this.#network = new VirtualNetwork(network, deriveStream(seed, 'network'));
+    this.#monitor = invariants.length === 0 ? null : new InvariantMonitor(invariants, invariantPolicy);
 
     const runStart = this.#trace.append({
       kind: 'run.start',
@@ -82,6 +91,8 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       limits,
       persistence: 'sync-on-commit',
       faults,
+      invariants: invariants.map((invariant) => invariant.ref),
+      invariantPolicy,
     });
 
     for (const id of nodes) {
@@ -136,6 +147,25 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     return Object.freeze(Object.fromEntries([...storage.keys()].sort().map((key) => [key, storage.get(key) as JsonValue])));
   }
 
+  /** Messages currently in flight, in send order (frozen). */
+  inFlight(): readonly InFlightMessage[] {
+    return Object.freeze([...this.#inFlight.values()]);
+  }
+
+  /** Ids of messages with a live delivery event in the scheduler (diagnostics; O(n log n)). */
+  scheduledDeliveries(): readonly MessageId[] {
+    return Object.freeze(
+      this.#scheduler
+        .liveEvents()
+        .flatMap((scheduled) => (scheduled.event.kind === 'message.deliver' ? [scheduled.event.message.id] : [])),
+    );
+  }
+
+  /** Current history of a historical invariant (deeply frozen), or undefined for an unknown id. */
+  invariantHistory(id: string): JsonValue | undefined {
+    return this.#monitor?.history(id);
+  }
+
   nodeInfo(id: NodeId): NodeInfo {
     const node = this.#node(id);
     return Object.freeze({ status: node.status, incarnation: node.incarnation });
@@ -160,13 +190,138 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     const scheduled = this.#scheduler.next();
     if (scheduled === undefined) throw new EngineInvariantError('peeked event vanished');
     this.#eventsProcessed++;
+    const stepStart = this.#trace.length;
 
     if (!this.#dispatch(scheduled.event)) {
       this.#stop('protocol-error');
       return true;
     }
+    if (this.#monitor !== null) {
+      const reason = this.#checkInvariants(this.#monitor, stepStart);
+      if (reason !== null) {
+        this.#stop(reason);
+        return true;
+      }
+    }
     if (this.#scheduler.pendingCount > limits.maxPendingEvents) this.#stop('pending-limit');
     return true;
+  }
+
+  /**
+   * Evaluate every invariant after a committed step and record the outcomes in configuration
+   * order (ADR-0013). Returns the stop reason, if the outcomes require stopping.
+   */
+  #checkInvariants(monitor: InvariantMonitor, stepStart: number): StopReason | null {
+    const trigger = this.#trace.at(stepStart);
+    if (trigger === undefined) throw new EngineInvariantError('a committed step appended no trace entry');
+    const step: StepInfo = Object.freeze({ trigger, entries: this.#trace.slice(stepStart) });
+    const stepLast = this.#trace.length - 1;
+    const outcomes = monitor.evaluate(this.#view(), step, (id) => typeof id === 'string' && this.#nodes.has(id), this.#trace.length);
+
+    let error = false;
+    let violation = false;
+    const time = this.#scheduler.now;
+    for (const outcome of outcomes) {
+      switch (outcome.kind) {
+        case 'violation': {
+          violation = true;
+          const { partition, links } = this.#network.conditions();
+          this.#trace.append({
+            kind: 'invariant.violation',
+            time,
+            cause: stepStart,
+            violationId: outcome.violationId,
+            invariant: outcome.invariant,
+            nodes: outcome.nodes,
+            expected: outcome.expected,
+            observed: outcome.observed,
+            evidence: outcome.evidence,
+            references: outcome.references,
+            trigger: stepStart,
+            step: Object.freeze({ first: stepStart, last: stepLast }),
+            nodeStates: Object.freeze(
+              outcome.nodes.map((id) => {
+                const node = this.#node(id);
+                return Object.freeze({ node: id, status: node.status, incarnation: node.incarnation, stateEntry: node.stateEntry });
+              }),
+            ),
+            activeFaults: Object.freeze({
+              partition: partition?.since ?? null,
+              links: Object.freeze(links.map((link) => link.since)),
+              crashed: Object.freeze([...this.#nodes.values()].flatMap((node) => (node.crashedAt === null ? [] : [node.crashedAt]))),
+            }),
+            eventNumber: this.#eventsProcessed,
+          });
+          break;
+        }
+        case 'cleared':
+          this.#trace.append({ kind: 'invariant.cleared', time, cause: stepStart, violationId: outcome.violationId, invariant: outcome.invariant });
+          break;
+        case 'error':
+          error = true;
+          this.#trace.append({ kind: 'invariant.error', time, cause: stepStart, invariant: outcome.invariant, error: outcome.error });
+          break;
+      }
+    }
+    if (error) return 'invariant-error';
+    if (violation && this.config.invariantPolicy === 'stop-on-first') return 'invariant-violation';
+    if (monitor.violations >= this.config.limits.maxViolations) return 'violation-limit';
+    return null;
+  }
+
+  /**
+   * A deeply frozen, read-only view for invariants (ADR-0012). Storage snapshots, the in-flight
+   * list and network conditions are built lazily on first access and cached for this step. No
+   * engine object (Map, NodeRuntime, scheduler) is reachable from it.
+   */
+  #view(): SimulationView {
+    const nodeViews = Object.freeze(
+      [...this.#nodes.values()].map((node): NodeView => {
+        let storage: Readonly<Record<string, JsonValue>> | undefined;
+        const nodeStorage = (): Readonly<Record<string, JsonValue>> => (storage ??= this.nodeStorage(node.id));
+        return Object.freeze({
+          id: node.id,
+          status: node.status,
+          incarnation: node.incarnation,
+          state: node.state,
+          stateEntry: node.stateEntry,
+          get storage() {
+            return nodeStorage();
+          },
+        });
+      }),
+    );
+    const byId = new Map(nodeViews.map((view) => [view.id, view]));
+    let inFlight: readonly InFlightMessage[] | undefined;
+    let network: SimulationView['network'] | undefined;
+    const inFlightList = (): readonly InFlightMessage[] => (inFlight ??= Object.freeze([...this.#inFlight.values()]));
+    const networkView = (): SimulationView['network'] => {
+      if (network === undefined) {
+        const { partition, links } = this.#network.conditions();
+        network = Object.freeze({
+          partition: partition?.groups ?? null,
+          links: Object.freeze(links.map(({ from, to, loss, delay }) => Object.freeze({ from, to, loss, delay }))),
+        });
+      }
+      return network;
+    };
+    const lookup = Object.freeze((id: NodeId): NodeView => {
+      const view = byId.get(id);
+      if (view === undefined) throw new RangeError(`unknown node ${String(id)}`);
+      return view;
+    });
+    return Object.freeze({
+      time: this.#scheduler.now,
+      eventNumber: this.#eventsProcessed,
+      nodes: nodeViews,
+      node: lookup,
+      get inFlight() {
+        return inFlightList();
+      },
+      get network() {
+        return networkView();
+      },
+    });
   }
 
   /** Step until a stop condition is reached. Always terminates because of `limits.maxEvents`. */
@@ -216,6 +371,8 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       case 'message.deliver': {
         const { message } = event;
         const node = this.#node(message.to);
+        // The delivery event is being dispatched: whatever happens next, it is no longer in flight.
+        if (!this.#inFlight.delete(message.id)) throw new EngineInvariantError(`message ${message.id} missing from the in-flight index`);
         // Network first: a message cut off by a partition never reached the machine at all.
         const partitionIndex = this.#network.blockedAtDelivery(message.from, message.to);
         if (partitionIndex !== null) {
@@ -386,7 +543,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     this.#applyEffects(node, effects, cause);
     if (nextState !== node.state) {
       node.state = nextState;
-      this.#trace.append({
+      node.stateEntry = this.#trace.append({
         kind: 'state.update',
         time: this.#scheduler.now,
         cause,
@@ -445,6 +602,10 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
             this.#drop(message, decision.reason, decision.conditionIndex, sendIndex);
           } else {
             this.#scheduler.schedule(decision.deliverAt, { kind: 'message.deliver', message, cause: sendIndex });
+            this.#inFlight.set(
+              effect.id,
+              Object.freeze({ id: effect.id, from: node.id, to: effect.to, payload: effect.payload, sentAt: now, deliverAt: decision.deliverAt, sendIndex }),
+            );
           }
           break;
         }

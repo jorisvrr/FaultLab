@@ -65,8 +65,25 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | E1 | **Trace entries mutated after the fact** (by UI code). | ✅ Entries frozen; `trace` getter returns a frozen copy. |
 | E2 | **Snapshot misses execution-relevant state.** Restoring from it diverges. Classic misses: scheduler `nextSeq`, PRNG states, per-node counters, cancelled-but-in-heap events, pending timer map, and since CP1 node incarnations, persistent storage, `crashedAt`, the active partition and link conditions. | 🔜 CP3: snapshot = all of those. Metamorphic test: `run(N) ≡ restore(snapshot@k) + run(N−k)` for random k. |
 | E3 | **Trace size.** Full-state `state.update` entries grow with state size × steps. | 🟡 Structural sharing makes in-memory cost proportional to *changes*. Serialised size is larger. CP9: chunking/diff encoding. |
+| E6 | **Shallowly frozen trace entries.** Nested arrays (`cancelledTimers`) and objects (`run.start.protocol`) were mutable although the entry itself was frozen; the CP0/CP1 tests only checked `Object.isFrozen(entry)`. | ✅ Found in CP2 by a graph-walk test; `EventTrace.append` now deep-freezes. Regression test walks every entry of a fault-heavy run. |
 | E4 | **Golden hash updated without a version bump.** | 🟡 Process rule in the golden test and [TEST_STRATEGY](TEST_STRATEGY.md). |
 | E5 | **Cross-engine divergence** (V8 vs SpiderMonkey vs JavaScriptCore). | 🔜 CP5: Playwright runs the golden experiment in Chromium, Firefox and WebKit and compares fingerprints. |
+
+## G. Invariant checking and exploration (CP2)
+
+| # | Failure mode | Status / handling |
+|---|---|---|
+| G1 | **The checker changes what it checks** (mutating state, payloads, the trace, or its own inputs). | ✅ Deeply frozen view and step; history copied and frozen; a graph-walk test proves no mutable or engine object is reachable; 11 mutation attempts are each contained as `invariant.error` with an identical trace prefix. |
+| G2 | **Startup false positives.** Before convergence every node may think it is leader, so "at most one leader" fails for a protocol that is fine. | ✅ Solved in the protocol, not by weakening the invariant: nodes may claim only after `timeout` ticks, by which time they have heard all live higher nodes. Tested over 200 seeds × 2 cluster sizes: first claim at t ≥ 60, only the highest node ever claims. |
+| G3 | **Duplicate violations for one persistent failure.** | ✅ Episodes under `record-and-continue`; `maxViolations` bounds flapping. |
+| G4 | **Ambiguous order when several invariants fail in one step.** | ✅ Configuration order, all recorded, errors outrank violations. |
+| G5 | **Speculative explanations.** A record claiming "caused by the partition" when that is not provable from the trace. | ✅ The engine records facts only (trigger, step, state provenance, active faults). Inference is left to the UI, labelled as such. |
+| G6 | **Volatile protocol knowledge that must be durable.** The first naive-leader draft kept its epoch in volatile state; after every node crashed, a later leader reused epoch 1. | ✅ Found by the crash/recover property test; the epoch is now persisted (like Raft's `currentTerm`); pinned as a regression test. |
+| G7 | **Persistence without a quorum.** Even with persisted epochs, if the only node that knows the latest epoch is down, a new leader can reuse it. | 🟡 A genuine, documented weakness of the naive protocol (no network fault needed), demonstrated by a dedicated test. Raft's majority votes close it (CP4). |
+| G8 | **Non-deterministic property tests.** fast-check picks a fresh random seed per run, so a suite can pass today and fail tomorrow. | ✅ Fixed global seed in `test/setup.ts`; random exploration is opt-in (`npm run test:explore`). |
+| G9 | **Shrinking produces invalid or non-minimal plans.** | ✅ Arbitraries are valid by construction and shrinking stays inside them; every counterexample is re-validated with `resolveFaults`; a greedy pass guarantees 1-minimality, which tests verify independently. |
+| G10 | **Stored counterexamples silently re-interpreted by a newer engine.** | ✅ The engine version is stored in each fixture; a mismatch fails the replay test with an explicit message. |
+| G11 | **Runtime-verification overhead** large enough to discourage checking. | 🟡 Measured (TEST_STRATEGY, CP2). Optimisation candidates are recorded for CP9; nothing optimised yet. |
 
 ## F. Future UI-specific hazards (recorded now so the design respects them)
 

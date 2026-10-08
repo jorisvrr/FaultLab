@@ -4,7 +4,7 @@
 
 FaultLab runs networks of virtual computers executing distributed protocols under controlled latency, crashes, message loss and partitions. Every run is reproducible from its seed. Every message, timer and state change is recorded in an append-only, causally linked trace that you can inspect, replay and share.
 
-> **Status: CP1, fault injection and node lifecycle.** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay. There is no UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
+> **Status: CP2, invariant checking and fault exploration.** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, plus online safety invariants with explainable violations and automatic search for minimal failing fault plans. There is no UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -21,7 +21,7 @@ const result = runSimulation({
 
 result.reason;                    // 'quiescent'
 result.eventsProcessed;           // 45
-fingerprintTrace(result.trace);   // 'd13876e0', identical on every run and machine
+fingerprintTrace(result.trace);   // '09f7b23f', identical on every run and machine
 ```
 
 Faults are part of the experiment's input:
@@ -45,6 +45,26 @@ runSimulation({
 });
 ```
 
+Safety properties are executable specifications, checked after every step:
+
+```ts
+import { createNaiveLeaderProtocol, singleLeader } from '@faultlab/engine/fixtures';
+
+const result = runSimulation({
+  seed: 7,
+  nodes: ['n1', 'n2', 'n3', 'n4'],
+  protocol: createNaiveLeaderProtocol(),       // deliberately unsafe leader election
+  network: { latency: { min: 1, max: 10 } },
+  limits: { maxTime: 1000 },
+  faults: [{ at: 300, type: 'partition', groups: [['n4']] }],
+  invariants: [singleLeader],                  // stop-on-first by default
+});
+// result.reason === 'invariant-violation'; the trace ends with an explainable record:
+// { invariant: { id: 'single-leader', … }, time: 347, nodes: ['n3', 'n4'],
+//   expected: 'At most one running node is leader', observed: '2 running nodes are leader: n3, n4',
+//   trigger, step, nodeStates, activeFaults: { partition: <entry of the partition>, … }, eventNumber }
+```
+
 - Discrete-event scheduler with a strict total order on (virtual time, sequence number)
 - Integer virtual clock; no wall-clock time anywhere in the engine
 - xoshiro128\*\* PRNG, bit-exact with the C reference, with an independent stream per node and for the network
@@ -55,7 +75,10 @@ runSimulation({
 - **Node lifecycle** with incarnations: stale timers can never fire; volatile state is lost, persistent storage (`sync-on-commit`) survives
 - Precise in-flight semantics: partitions cut messages in flight; every drop links to the fault that caused it
 - Scheduler heap compaction (Floyd heapify), so long-running timer-reset workloads use bounded memory
-- 224 tests: unit, property-based over random fault plans, an independent trace oracle, reference vectors, golden traces, architecture fitness, mutation-checked
+- **Invariants** (state and historical) evaluated after every step over deeply frozen views; stop-on-first or record-and-continue; explainable violation records that separate facts from claims
+- **Fault exploration**: fast-check generates fault plans, shrinks failures to 1-minimal counterexamples, and stores them as replayable fixtures
+- In-flight message index, property-tested against the scheduler and the trace
+- 313 tests: unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
 
 ## Getting started
 

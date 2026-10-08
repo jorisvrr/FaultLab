@@ -579,3 +579,336 @@ Vertrouw niet op "alle tests groen". Controleer of de tests de juiste gevallen r
 - **Garbage collection:** het automatisch vrijgeven van geheugen dat niet meer gebruikt wordt.
 - **JIT-compiler:** compileert JavaScript tijdens het uitvoeren naar snelle machinecode, op basis van wat hij ziet.
 - **Profileren:** meten waar een programma zijn tijd en geheugen aan besteedt.
+
+---
+
+## CP2 — Invarianten, verklaarbare overtredingen en fault-exploratie
+
+**Datum:** 2026-10-08 · **Status:** afgerond en goedgekeurd · **Engine-versie:** `0.3.0-cp2`
+
+CP1 kon fouten veroorzaken. CP2 laat de engine zelf zien wanneer een protocol daardoor een regel breekt die altijd zou moeten gelden, en zoekt daarna automatisch het *kleinste* scenario dat die fout veroorzaakt. Het einddoel is een complete keten: willekeurige faultplannen → overtreding → verkleinen → opslaan → exact opnieuw afspelen.
+
+Ontwerp vooraf: ADR-0012 (invariantmodel), ADR-0013 (beleid en verklaarbare overtredingen), ADR-0014 (exploratie en shrinking), en de acceptatiecriteria in `docs/ROADMAP.md`.
+
+### CP2.1 — Safety properties en invarianten als uitvoerbare specificaties
+
+**1. Wat hebben we gebouwd?**
+Een **invariant** is een stuk code dat na elke stap van de simulatie controleert of een regel nog geldt (`invariants.ts`). Bijvoorbeeld: "er is hooguit één leider". De engine roept alle invarianten aan, in een vaste volgorde, met een alleen-lezen beeld (*view*) van het hele systeem.
+
+**2. Waarom is dit nodig?**
+Een specificatie in een Word-document kun je niet testen. Een invariant is een specificatie die de computer kan *uitvoeren*. Zo weet je niet alleen dát een protocol "raar doet", maar precies welke regel wanneer brak.
+
+**3. Hoe werkt het?**
+Er zijn twee soorten eigenschappen:
+- Een **safety property** zegt "er gebeurt nooit iets slechts" (nooit twee leiders). Die kun je controleren door na elke stap te kijken.
+- Een **liveness property** zegt "uiteindelijk gebeurt er iets goeds" (er komt ooit een leider). In een eindige run kun je dat alleen tot een deadline controleren. Dat komt in CP4.
+
+En er zijn twee soorten invarianten:
+- **State-invariant:** kijkt alleen naar *nu*. Voorbeeld: `single-leader`, "op dit moment hooguit één leider".
+- **Historische invariant:** onthoudt iets uit het verleden in een expliciete `history`. Voorbeeld: `unique-leader-per-epoch`, "per epoch ooit maar één leider". Twee leiders van dezelfde epoch op *verschillende* momenten ziet een state-invariant niet, een historische wel.
+
+```ts
+// Historische invariant: history is gewone JSON die de engine bewaart.
+check: ({ view, history }) => {
+  // … vergelijk de huidige leiders met wat in history staat …
+  return { ok: true, history: next };
+}
+```
+
+**4. Welke keuzes zijn gemaakt?**
+- Invarianten draaien **online** (tijdens de run), niet pas achteraf over de trace. Zo kan een run stoppen bij de eerste overtreding.
+- De history is **expliciete, geversioneerde JSON** die de engine beheert, en geen verborgen variabele in de invariant. Daardoor is ze deterministisch, controleerbaar (`sim.invariantHistory(id)`) en later op te nemen in snapshots (CP3).
+
+**5. Welke problemen kwamen we tegen?**
+Invarianten zijn *trusted code*: we vertrouwen erop dat ze geen `Math.random()` gebruiken. Een sandbox voor onbetrouwbare code komt pas in CP10.
+
+**6. Hoe hebben we het getest?**
+✅ Een test telt dat elke stap precies één keer gecontroleerd wordt (ook fault-stappen en stappen met alleen een drop). ✅ Een run met en zonder een onschuldige invariant geeft exact dezelfde trace, op de `run.start`-metadata na. ✅ Omdat invarianten pure functies zijn, kunnen we ze ook los testen met zelfgemaakte views.
+
+**7. Wat heb ik hiervan geleerd?**
+Een goede specificatie is *uitvoerbaar*. En "nu" en "ooit" zijn verschillende soorten regels die verschillende hulpmiddelen nodig hebben.
+
+**8. Belangrijkste begrippen**
+- **Invariant:** een eigenschap die altijd waar moet zijn.
+- **Safety vs. liveness:** "nooit iets slechts" vs. "uiteindelijk iets goeds".
+- **State- vs. historische invariant:** alleen het heden vs. ook het verleden.
+- **Runtime verification:** eigenschappen controleren terwijl het programma draait.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Wat is het verschil tussen safety en liveness, en waarom controleert FaultLab (nog) alleen safety?
+2. Bedenk een scenario waarin twee nodes leider zijn van dezelfde epoch, maar nooit tegelijk. Waarom ziet `single-leader` dit niet, en wat moet `unique-leader-per-epoch` in zijn history bijhouden om het wél te zien?
+3. Waarom moet de history van een invariant expliciete JSON zijn?
+
+### CP2.2 — Een controle mag niets veranderen: runtime-onveranderlijkheid
+
+**1. Wat hebben we gebouwd?**
+Een alleen-lezen `SimulationView` waarin **alles diep bevroren is** (`Object.freeze` op elk niveau), plus een test die dat bewijst door het hele objectnetwerk af te lopen (*graph walk*).
+
+**2. Waarom is dit nodig?**
+Een controle die de simulatie beïnvloedt, meet zichzelf. Stel dat een invariant per ongeluk `state.role = 'follower'` doet: dan zou de "gecontroleerde" run anders verlopen dan de echte.
+
+**3. Hoe werkt het?**
+TypeScript's `readonly` bestaat alleen tijdens het compileren. Tijdens het draaien is het verdwenen, dus het is **geen** echte bescherming. Daarom bevriezen we de data echt. Schrijven naar bevroren data geeft in strict mode een `TypeError`; die wordt netjes vastgelegd als `invariant.error`. De graph-walk-test volgt elke eigenschap (ook getters) en controleert dat elk bereikbaar object bevroren is en geen engine-object is (geen `Map`, geen `NodeRuntime`).
+
+**4. Welke keuzes zijn gemaakt?**
+Opslag, berichten onderweg en netwerkcondities worden per stap pas gekopieerd en bevroren als een invariant ze opvraagt (*lazy*). Wat niet gebruikt wordt, kost niets.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een echte bug uit CP0/CP1.** De graph-walk-test vond dat trace-entries maar *oppervlakkig* bevroren waren: de entry zelf wel, maar de lijst `cancelledTimers` in een `node.crash`-entry (en `run.start.protocol`) niet. Iedereen met toegang tot de trace kon die dus aanpassen. De oude test controleerde alleen `Object.isFrozen(entry)`, één niveau diep. De oplossing: `EventTrace.append` bevriest nu alles diep. Een nieuwe regressietest faalt op de oude code en slaagt op de nieuwe.
+
+**6. Hoe hebben we het getest?**
+✅ 11 verschillende pogingen tot aanpassing (state, opslag, lijsten, de view zelf, trace-entries, …). Elke poging gaf een echte schrijfweigering, zoals "Cannot assign to read only property", en de trace tot aan de fout was identiek aan die van een onschuldige run. ✅ Stille pogingen via `Reflect.set` geven `false` en veranderen niets.
+
+**7. Wat heb ik hiervan geleerd?**
+Types beschermen tijdens het programmeren, maar niet tijdens het draaien. En een test die maar één niveau diep kijkt, kan een fout jarenlang missen.
+
+**8. Belangrijkste begrippen**
+- **Immutability (onveranderlijkheid):** data die na het maken niet meer kan veranderen.
+- **Shallow vs. deep freeze:** alleen het buitenste object, of alles erin.
+- **Side effect:** een verandering buiten de functie zelf.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is `readonly` in TypeScript geen runtime-bescherming?
+2. Stel dat een invariant `view.nodes[0].state.lastHeard.n2 = 0` uitvoert. Wat gebeurt er nu precies? En wat zou er misgaan in de simulatie en in de trace als de state maar *oppervlakkig* bevroren was?
+
+### CP2.3 — Verklaarbare overtredingen en beleid
+
+**1. Wat hebben we gebouwd?**
+Een gestructureerde **overtredingsrecord** (`invariant.violation`) en twee beleidsvormen: `stop-on-first` (standaard) en `record-and-continue`.
+
+**2. Waarom is dit nodig?**
+"Test faalt" is niet genoeg om een gedistribueerde bug te begrijpen. De toekomstige UI moet de betrokken nodes kunnen oplichten, naar het veroorzakende event kunnen springen, de causale keten kunnen tonen, verwacht en waargenomen naast elkaar kunnen zetten, en de fout exact opnieuw kunnen afspelen.
+
+**3. Hoe werkt het?**
+Het record bestaat uit twee delen:
+- Wat de **invariant beweert**: betrokken nodes, `expected`, `observed`, gestructureerd bewijs (`evidence`) en verwijzingen naar eerdere trace-entries.
+- Wat de **engine waarnam** (feiten): het event dat de stap startte (`trigger`), de reeks entries van die stap, per node waar zijn huidige state vandaan kwam (`stateEntry`), welke faults op dat moment actief waren, en het eventnummer om tot precies dat punt te kunnen herhalen.
+
+De engine schrijft **nooit** "veroorzaakt door de partitie". Dat is een conclusie, geen feit. Hij schrijft wel: "deze partitie was op dat moment actief". De UI mag later kandidaat-oorzaken voorstellen, maar dan duidelijk als vermoeden.
+
+Bij `record-and-continue` is één aanhoudende fout één **episode**: één entry bij het begin, en een `invariant.cleared` als de regel weer geldt. Zo voorkom je duizenden dubbele meldingen. Falen er meerdere invarianten in dezelfde stap, dan worden ze vastgelegd in de volgorde van de configuratie. Een crashende invariant stopt de run altijd, want een kapotte controle is niet te vertrouwen.
+
+**4. Welke keuzes zijn gemaakt?**
+Ontdubbelen per invariant, niet per combinatie van nodes. Een fout die van nodes wisselt, blijft zo één incident (ADR-0013).
+
+**5. Welke problemen kwamen we tegen?**
+In één test nam ik aan dat er een event op precies t=100 zou zijn. Dat was niet zo; de eerste stap ná 100 was op t=103. De test zat fout, niet de engine.
+
+**6. Hoe hebben we het getest?**
+✅ Tests voor stop-on-first, episodes, `invariant.cleared`, de limiet `maxViolations`, de volgorde bij meerdere fouten, crashende controles en 10 soorten ongeldige uitkomsten (onbekende node, te lange tekst, verwijzing naar de toekomst, …). ✅ Op het split-brain-scenario wijzen alle feitvelden naar de juiste entries.
+
+**7. Wat heb ik hiervan geleerd?**
+Een goede foutmelding scheidt **feiten** van **conclusies**, en bevat alles wat nodig is om de fout opnieuw te zien.
+
+**8. Belangrijkste begrippen**
+- **Explainability (uitlegbaarheid):** een resultaat kunnen onderbouwen.
+- **Provenance (herkomst):** waar een stuk data vandaan kwam.
+- **Episode:** de periode waarin een fout aanhoudt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Een UI toont bij een overtreding: "Oorzaak: partitie f2". Welke velden van het record rechtvaardigen die tekst, welke niet, en hoe zou jij het formuleren zodat feit en vermoeden gescheiden blijven?
+2. Waarom zegt de engine niet "veroorzaakt door de partitie"?
+3. Wat gebeurt er bij `record-and-continue` als een fout 50 stappen aanhoudt?
+
+### CP2.4 — Split brain: een opzettelijk onveilig leider-algoritme
+
+**1. Wat hebben we gebouwd?**
+`createNaiveLeaderProtocol` (`fixtures/naive-leader.ts`): een node wordt leider als hij de hoogste node is die hij nog hoort. Daarbij horen vijf invarianten.
+
+**2. Waarom is dit nodig?**
+We willen laten zien dat de keten *echte* bugs vindt. Dit protocol is expres zo gemaakt dat het goed werkt op een gezond netwerk maar faalt bij een partitie: **split brain**.
+
+**3. Hoe werkt het?**
+Elke node stuurt elke ~20 ticks een heartbeat. Een node die minstens `timeout` (60) ticks draait en geen hogere node meer hoort, wordt leider met epoch = (hoogst geziene epoch) + 1. Hoort een leider een hogere node, dan treedt hij meteen af.
+
+- **Geen vals alarm bij het opstarten.** Direct na de start denkt elke node "ik hoor niemand", en zou dus leider worden. Daarom mag niemand claimen vóór `timeout`; tegen die tijd heeft iedereen de hogere nodes gehoord. We losten dit op in het *protocol*, niet door de invariant soepeler te maken.
+- **De demonstratie.** Eerst wordt n4 stabiel leider. Daarna isoleert een partitie n4 (t=300). n3 hoort n4 niet meer en wordt om t=347 ook leider: ✅ `single-leader` faalt, met n3 (epoch 2) en n4 (epoch 1).
+
+**4. Welke keuzes zijn gemaakt?**
+De leider-epoch staat los van de "hoogst geziene" epoch, zodat de historische invariant het juiste meet.
+
+**5. Welke problemen kwamen we tegen?**
+Dit is het leerzaamste deel van CP2. De property tests vonden **twee echte zwaktes** die we vooraf niet bedacht hadden:
+1. ✅ **Vluchtige epochs.** In de eerste versie stond de epoch alleen in het geheugen. Als alle nodes crashten, wist niemand meer dat epoch 1 al gebruikt was, en een nieuwe leider nam opnieuw epoch 1. Oplossing: de epoch opslaan in persistente storage, precies zoals Raft `currentTerm` opslaat. Het gevonden scenario is nu een vaste regressietest.
+2. ✅ **Opslaan is niet genoeg zonder quorum.** Een stresstest met 3.000 plannen vond daarna dat het nog steeds mis kan gaan, zónder enige netwerkfout. Als de enige node die de nieuwste epoch kent net gecrasht is, weet niemand anders ervan en wordt dezelfde epoch opnieuw gebruikt. Alleen een **meerderheid (quorum)** lost dit op: twee meerderheden overlappen altijd in minstens één node, die het dan weet. Dat is precies het idee achter Raft (CP4). Deze zwakte staat bewust gedocumenteerd, met een eigen test.
+
+✅ `single-leader` bleef wél gelden in 4.000 willekeurige plannen met alleen crashes en herstarts.
+
+**6. Hoe hebben we het getest?**
+✅ 50 seeds × 2 clustergroottes zonder faults: niemand claimt vóór t=60, alleen de hoogste node wordt ooit leider, en geen enkele invariant faalt. ✅ Property test met 150 crash/recover-plannen: `single-leader` en drie andere invarianten blijven gelden. ✅ Split brain na stabilisatie, met alle verklarende velden gecontroleerd. ✅ Een scenario waarin alleen de historische invariant faalt.
+
+**7. Wat heb ik hiervan geleerd?**
+"Wie zwijgt, is dood" is in een netwerk een gevaarlijke aanname. En property tests vinden fouten waar je zelf niet aan denkt: twee keer, in één checkpoint.
+
+**8. Belangrijkste begrippen**
+- **Split brain:** twee delen van een systeem nemen tegelijk de leiding.
+- **Epoch / term:** een oplopend nummer dat "regeerperiodes" onderscheidt.
+- **Quorum:** een meerderheid. Twee meerderheden overlappen altijd.
+- **Failure detector:** iets dat probeert te raden welke nodes kapot zijn.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom geeft het protocol geen vals alarm tijdens het opstarten?
+2. Waarom loste het opslaan van de epoch het eerste probleem op, maar niet het tweede?
+3. Leg uit waarom twee meerderheden altijd overlappen, en waarom dat split brain voorkomt.
+
+### CP2.5 — Property-based exploratie en het verkleinen van tegenvoorbeelden
+
+**1. Wat hebben we gebouwd?**
+Een exploratiehulp (`test/explore.ts`) die met fast-check willekeurige faultplannen genereert, een overtreding zoekt, die verkleint (*shrinking*) en het resultaat controleert.
+
+**2. Waarom is dit nodig?**
+Een tegenvoorbeeld met 10 faults is moeilijk te begrijpen. Hetzelfde probleem met 1 of 2 faults is meteen duidelijk.
+
+**3. Hoe werkt het?**
+1. fast-check genereert plannen en draait de simulatie tot een invariant faalt.
+2. **Shrinking:** fast-check probeert steeds kleinere varianten (minder faults, eerdere tijden, eenvoudigere waarden) en houdt de kleinste die nog faalt.
+3. Een extra **greedy stap** probeert daarna elke fault één voor één weg te laten.
+4. Het resultaat is **1-minimaal**: haal je één willekeurige fault weg, dan verdwijnt de overtreding. Dat is niet per se het *allerkleinste* plan, maar wel een precieze, controleerbare definitie.
+
+Faults beginnen in deze exploratie pas vanaf t=150, als er al een stabiele leider is. Zo laat elk tegenvoorbeeld zien hoe een fault een *gevestigde* leider breekt.
+
+**4. Welke keuzes zijn gemaakt?**
+De exploratie staat in de testcode, zodat fast-check geen dependency van de engine wordt. We gingen er niet van uit dat het kleinste voorbeeld precies één partitie bevat, en dat bleek terecht (zie hieronder).
+
+**5. Welke problemen kwamen we tegen?**
+✅ Gemeten resultaten (fast-check-seed 424242):
+
+| Invariant | Eerste fout na | Origineel | Shrink-stappen | Verkleind tot |
+|---|---|---|---|---|
+| `single-leader` | 1 run | 3 faults | 2 | 1 partitie (n3 geïsoleerd, t=150) |
+| `unique-leader-per-epoch` | 19 runs | 10 faults | 28 | **2 partities** (t=150 en t=196) |
+
+Het tweede geval laat zien waarom "precies één partitie" geen goede verwachting was: de fout heeft twee opeenvolgende netwerksplitsingen nodig.
+
+**6. Hoe hebben we het getest?**
+✅ Gevonden, geldig (gecontroleerd met `resolveFaults`), 1-minimaal (onafhankelijk gecontroleerd), deterministisch opnieuw af te spelen, en de leider was stabiel vóór de eerste fault.
+
+**7. Wat heb ik hiervan geleerd?**
+Een computer kan een kleine, begrijpelijke reproductie van een bug vinden, zolang je precies definieert wat "klein" betekent.
+
+**8. Belangrijkste begrippen**
+- **Property-based testing:** testen met automatisch gegenereerde invoer.
+- **Shrinking:** een falend voorbeeld automatisch verkleinen.
+- **Counterexample (tegenvoorbeeld):** concrete invoer waarvoor een eigenschap niet geldt.
+- **1-minimaal:** elke afzonderlijke fault is nodig.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is een tegenvoorbeeld met 1 fault waardevoller dan hetzelfde probleem met 10 faults? En waarom kan shrinking nooit een ongeldig plan opleveren, zoals een link van n1 naar n1?
+2. Verzin een faultplan dat 1-minimaal is, maar niet het kleinst mogelijke plan voor dezelfde fout. Wat zegt dat over de garantie die onze exploratie geeft?
+
+### CP2.6 — Deterministische reproductie
+
+**1. Wat hebben we gebouwd?**
+- Opgeslagen tegenvoorbeelden als JSON-fixtures (`test/counterexamples/`), formaat `faultlab-counterexample/1`.
+- Een vaste seed voor alle property tests.
+- *Legacy projections*: oude golden fingerprints blijven controleerbaar.
+
+**2. Waarom is dit nodig?**
+Een gevonden bug moet voor altijd een test blijven. En een testsuite die vandaag slaagt en morgen faalt zonder codewijziging, is onbetrouwbaar.
+
+**3. Hoe werkt het?**
+- Een fixture bevat de engineversie, het protocol met zijn opties, het faultplan, de invariant, hoe het voorbeeld gevonden is, en de verwachte uitkomst (tijd, nodes, eventnummer, trace-fingerprint). De replaytest moet exact dezelfde uitkomst geven.
+- Klopt de engineversie van een fixture niet, dan faalt de test met een duidelijke melding, in plaats van de oude data stilletjes anders te interpreteren.
+- fast-check koos eerst bij elke run een nieuwe willekeurige seed. Nu staat er één vaste seed in `test/setup.ts`; met `npm run test:explore` kun je bewust willekeurig zoeken.
+- `test/legacy.ts` haalt de velden weg die latere versies *toevoegden*. Een CP2-trace zonder invarianten geeft dan exact de CP1- en CP0-vingerafdrukken (`d13876e0`, `17b2dde2`, `62159051`).
+
+**4. Welke keuzes zijn gemaakt?**
+We leggen de *replay* vast, niet het zoekproces: de shrink-route kan veranderen bij een nieuwe fast-check-versie, de replay hangt alleen van FaultLab af.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Eén testbestand importeerde hulpfuncties uit een ánder testbestand. Daardoor draaiden 10 tests stilletjes dubbel en was het aantal tests opgeblazen (322 in plaats van 312). De gedeelde code staat nu in een gewoon module-bestand (`test/arbitraries.ts`).
+
+**6. Hoe hebben we het getest?**
+✅ Beide fixtures spelen exact opnieuw af (vingerafdrukken `c5be175f` en `9e7ae94a`). ✅ Een fixture met een aangepaste engineversie faalt zoals bedoeld. ✅ De suite gaf drie keer achter elkaar hetzelfde resultaat.
+
+**7. Wat heb ik hiervan geleerd?**
+Reproduceerbaarheid geldt niet alleen voor de simulatie, maar ook voor de tests zelf.
+
+**8. Belangrijkste begrippen**
+- **Fixture:** vastgelegde testdata.
+- **Regressietest:** een test die een eerder gevonden fout bewaakt.
+- **Flaky test:** een test die zonder codewijziging soms faalt.
+- **Backward compatibility:** oude data blijft bruikbaar of wordt expliciet afgewezen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Een collega verandert hoe `network.ts` latency trekt, en de fixture-test faalt. Wat betekent dat? En waarom zou het fout zijn om alleen de verwachte fingerprint bij te werken?
+2. Waarom maakt een vaste fast-check-seed de suite betrouwbaarder, en wat verlies je daarmee?
+
+### CP2.7 — De index van berichten onderweg
+
+**1. Wat hebben we gebouwd?**
+Een index van alle berichten die verstuurd maar nog niet afgeleverd of gedropt zijn, in verzendvolgorde (`sim.inFlight()`, `view.inFlight`).
+
+**2. Waarom is dit nodig?**
+Invarianten (en later de UI) moeten "wat is er onderweg?" snel kunnen beantwoorden, zonder de scheduler te doorzoeken.
+
+**3. Hoe werkt het?**
+Een bericht komt in de index als zijn aflevering wordt ingepland, en gaat eruit zodra dat afleverings-event wordt afgehandeld: afgeleverd, of gedropt door partitie of crash. Berichten die al bij het verzenden gedropt worden, komen er nooit in.
+
+**4. Welke keuzes zijn gemaakt?**
+Een `Map` op bericht-id: snel toevoegen en verwijderen, en de volgorde van invoegen is deterministisch.
+
+**5. Welke problemen kwamen we tegen?**
+Mijn eerste testscenario bereikte de reden `node-down` nooit, omdat alle berichten naar de gecrashte node al eerder gedropt werden. Het scenario is aangepast zodat alle vier de drop-redenen voorkomen.
+
+**6. Hoe hebben we het getest?**
+✅ Property test over willekeurige faultplannen: na *elke* stap is de index gelijk aan (a) de afleveringen in de scheduler, (b) wat je uit de trace kunt afleiden, en (c) wat een invariant ziet. Elk veld komt overeen met de bijbehorende `message.send`.
+
+**7. Wat heb ik hiervan geleerd?**
+Een extra datastructuur is alleen veilig als je kunt bewijzen dat hij gelijk blijft aan de bron van waarheid.
+
+**8. Belangrijkste begrippen**
+- **Index:** een hulpstructuur om iets snel op te zoeken.
+- **Single source of truth:** één gezaghebbende bron; al het andere moet ermee kloppen.
+
+### CP2.8 — Wat kost runtime-verificatie?
+
+**1. Wat hebben we gebouwd?**
+Metingen met 0, 1 en 5 invarianten.
+
+**2. Waarom is dit nodig?**
+Als controleren te duur is, zet niemand het aan. Dan moet je weten waar de kosten zitten.
+
+**3. Hoe werkt het?**
+Workload: naive leader met 8 nodes, 100.000 events, gezond netwerk, geen overtredingen. De drie configuraties draaiden om en om, 15 keer elk, in twee losse rondes.
+
+✅ Resultaten (mediaan ronde 1 / ronde 2):
+- 0 invarianten: 525 / 504 ms
+- 1 invariant: 1.137 / 1.127 ms
+- 5 invarianten: 2.637 / 2.677 ms
+
+✅ Uitsplitsing: zonder invarianten 528 ms, met één invariant die *niets* doet 1.026 ms, met `single-leader` 1.166 ms. Ongeveer **5 µs per stap gaat dus naar het opbouwen van de bevroren view**, niet naar de controles zelf (`single-leader` kost ±1,4 µs per stap).
+
+**4. Welke keuzes zijn gemaakt?**
+Bewust **niet** geoptimaliseerd ("eerst meten, dan pas optimaliseren"). Het is vastgelegd als onderzoek **PERF-2**, met kandidaten: views hergebruiken voor nodes die niet veranderd zijn (veilig dankzij onveranderlijkheid), minder closures per stap, en invarianten alleen draaien bij relevante events. Harde voorwaarde voor elke toekomstige optimalisatie: **determinisme en runtime-onveranderlijkheid gaan altijd voor snelheid**. De bestaande tests (graph walk, aanvalspogingen, golden fingerprints) moeten ongewijzigd blijven slagen.
+
+**5. Welke problemen kwamen we tegen?**
+Mijn eerste meting liep tegen een timeout van 2 minuten aan; ik heb hem opnieuw op de achtergrond gedraaid. De gezonde-convergentie-test zat onder coverage-instrumentatie tegen de standaard testtimeout van 5 s aan; die test draait nu 50 seeds in plaats van 100, en de timeout is ruimer gezet.
+
+**6. Hoe hebben we het getest?**
+Herhaalde, afgewisselde runs met mediaan en spreiding. 💭 Het effect van CP2 op runs *zonder* invarianten is niet apart A/B-gemeten; zonder invarianten wordt de view niet eens gebouwd.
+
+**7. Wat heb ik hiervan geleerd?**
+Een "dure" functie is vaak duur door het klaarzetten van de invoer, niet door het rekenwerk zelf. Uitsplitsen laat zien waar je moet kijken.
+
+**8. Belangrijkste begrippen**
+- **Overhead:** extra kosten bovenop het eigenlijke werk.
+- **Mediaan en spreiding:** het typische resultaat, en hoeveel het varieert.
+- **Premature optimization:** optimaliseren voordat je weet waar het probleem zit.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom maak je een "doe-niets"-invariant om overhead te meten?
+2. Waarom is het hergebruiken van views veilig in FaultLab?
+3. Bedenk één manier om PERF-2 te versnellen. Hoe bewijs je dat determinisme en runtime-onveranderlijkheid daarbij intact blijven?
+
+### CP2 — Kwaliteitscontrole en resultaten
+
+✅ 313 tests (+2 die alleen fixtures schrijven) in 18 bestanden, allemaal geslaagd, in ±4,3 s. ✅ Dekking: 98,6% van de regels en 96,1% van de branches. ✅ 17 van 17 mutanten gevangen, waaronder "geen ontdubbeling", "view niet bevroren", "geen startvertraging in het protocol" (18 falende tests) en "epoch niet opgeslagen". ✅ De TypeScript-controles slagen.
+
+### CP2 — Bekende beperkingen
+
+- Liveness wordt nog niet gecontroleerd (CP4).
+- Invarianten zijn trusted code, zonder sandbox.
+- De zwaktes van het naive leader-protocol (split brain en hergebruik van epochs zonder quorum) zijn bewust niet opgelost; dat is de taak van Raft in CP4.
+- PERF-1 (uitschieters) en PERF-2 (kosten van de view) staan open voor CP9.
+- Exploratie is gericht zoeken, geen bewijs: niets vinden betekent niet dat er niets is.

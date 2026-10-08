@@ -5,6 +5,7 @@ import { runSimulation, Simulation } from '../src/simulation';
 import { fingerprintTrace, serializeTrace } from '../src/trace';
 import { ENGINE_VERSION } from '../src/version';
 import { config, ofKind, protocol } from './helpers';
+import { projectTrace } from './legacy';
 
 /** The reference CP0 experiment: randomized latency AND randomized protocol timers. */
 const reference = (seed = 42) =>
@@ -97,19 +98,16 @@ describe('determinism', () => {
   });
 
   /**
-   * CP0 compatibility: CP1 only ADDED information to fault-free traces (incarnations, the fault
-   * plan, the persistence model). Projecting a CP1 trace back onto the CP0 format must reproduce
-   * the CP0 golden fingerprint exactly, which proves scheduling, randomness and ordering are
-   * unchanged for runs without faults.
+   * Legacy compatibility. Later versions only ADDED information to traces of runs that don't use
+   * their features. Projecting the current trace onto an older format must reproduce that
+   * version's golden fingerprint exactly: scheduling, randomness and ordering are unchanged.
    */
   it('reproduces the CP0 golden fingerprint when projected onto the CP0 trace format', () => {
-    const projected = runSimulation(reference()).trace.map((entry) => {
-      const { incarnation: _incarnation, ...rest } = entry as typeof entry & { incarnation?: number };
-      if (rest.kind !== 'run.start') return rest;
-      const { persistence: _persistence, faults: _faults, ...start } = rest;
-      return { ...start, engineVersion: '0.1.0-cp0' };
-    });
-    expect(fingerprintTrace(projected as never)).toBe('62159051');
+    expect(fingerprintTrace(projectTrace(runSimulation(reference()).trace, '0.1.0-cp0') as never)).toBe('62159051');
+  });
+
+  it('reproduces the CP1 golden fingerprint when projected onto the CP1 trace format (invariants disabled)', () => {
+    expect(fingerprintTrace(projectTrace(runSimulation(reference()).trace, '0.2.0-cp1') as never)).toBe('d13876e0');
   });
 
   /**
@@ -120,10 +118,10 @@ describe('determinism', () => {
   it('matches the golden fingerprint for the reference experiment', () => {
     const { trace, eventsProcessed, finalTime } = runSimulation(reference());
     expect({ engine: ENGINE_VERSION, eventsProcessed, finalTime, fingerprint: fingerprintTrace(trace) }).toEqual({
-      engine: '0.2.0-cp1',
+      engine: '0.3.0-cp2',
       eventsProcessed: 45,
       finalTime: 150,
-      fingerprint: 'd13876e0',
+      fingerprint: '09f7b23f',
     });
   });
 });

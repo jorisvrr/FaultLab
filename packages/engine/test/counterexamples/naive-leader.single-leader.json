@@ -1,0 +1,62 @@
+{
+  "format": "faultlab-counterexample/1",
+  "description": "naive-leader: split brain: two simultaneous leaders (found by fault exploration)",
+  "engineVersion": "0.3.0-cp2",
+  "protocol": {
+    "name": "naive-leader",
+    "version": "1",
+    "options": {
+      "interval": 20,
+      "jitter": 5,
+      "timeout": 60
+    }
+  },
+  "invariant": {
+    "id": "single-leader",
+    "version": "1"
+  },
+  "config": {
+    "seed": 11,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 1000,
+    "faults": [
+      {
+        "at": 150,
+        "type": "partition",
+        "groups": [
+          [
+            "n3"
+          ]
+        ]
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 424242,
+    "runsUntilFailure": 1,
+    "originalFaultCount": 3,
+    "shrinkSteps": 2,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 1
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 209,
+    "nodes": [
+      "n3",
+      "n4"
+    ],
+    "observed": "2 running nodes are leader: n3, n4",
+    "eventNumber": 129,
+    "fingerprint": "c5be175f"
+  }
+}

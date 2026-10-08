@@ -81,6 +81,27 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 
 **Exercise:** add a rule: "a `message.drop` with reason `lost` happens at its send time". Run the property tests.
 
+## 12. Invariants as executable specifications (CP2) — `src/invariants.ts`, `#checkInvariants` and `#view` in `src/simulation.ts`
+
+**Know:** state vs. historical invariants; why history must be explicit JSON (snapshots, determinism); why evaluation order and the stop rules are part of the spec; why `readonly` types are not runtime immutability, and how the graph-walk test proves it.
+
+**Exercises**
+1. Write a state invariant for the heartbeat protocol: "no node suspects itself". Make it fail on purpose with a buggy protocol.
+2. Write a historical invariant: "a node's `boots` counter never decreases". What goes into `history`, and why must it be JSON?
+3. Under `record-and-continue`, what entries does a failure that lasts 50 steps produce? Why?
+
+## 13. Split brain and the naive leader protocol — `src/fixtures/naive-leader.ts`
+
+**Know:** why "leader = highest node I can hear" is safe on a healthy network and unsafe under partitions; why the startup delay prevents false positives; why persisting the epoch fixed one bug but not the second (no quorum).
+
+**Exercise:** sketch how a majority quorum would prevent both the partition counterexample and the crash-only epoch reuse (the essence of Raft, CP4).
+
+## 14. Exploration and shrinking — `test/explore.ts`
+
+**Know:** what fast-check's shrinking does and why shrunk plans stay valid; what 1-minimal means and why it is not "smallest"; why fixtures pin the replay, not the search.
+
+**Exercise:** change the exploration's earliest fault time from 150 to 0 and rerun. Is the counterexample still a meaningful demonstration? Why did we choose 150?
+
 ## Interview-style questions to practise
 
 - Why integer ticks instead of float milliseconds? What would break first with floats?
@@ -92,3 +113,7 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 - A crash and a timer are both due at t=10. Which happens first, and which rule guarantees it?
 - Why is a message in flight lost when a partition starts, but not when a link's loss rate changes?
 - Lazy deletion leaked memory in one workload. How did you measure it, and why can compaction not change the simulation's outcome?
+- What is the difference between a safety and a liveness property, and why does FaultLab only check safety (so far)?
+- How do you prevent an invariant from changing the simulation it checks? Why are `readonly` types not enough?
+- Your property tests passed immediately. What did you do to make sure they were actually testing something?
+- A stored counterexample stopped reproducing after an engine change. What does the test do, and what should you do?

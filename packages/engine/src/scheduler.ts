@@ -86,6 +86,20 @@ export class EventScheduler<E> {
     return { pending: this.#live.size, heapEntries: this.#heap.size, compactions: this.#compactions };
   }
 
+  /**
+   * All live events in dispatch order (cancelled ones excluded). O(n log n); meant for
+   * diagnostics, consistency tests and future snapshots, not for the hot path.
+   */
+  liveEvents(): readonly ScheduledEvent<E>[] {
+    const live: ScheduledEvent<E>[] = [];
+    const heap = new BinaryHeap<ScheduledEvent<E>>(compareScheduled);
+    this.#heap.forEach((scheduled) => {
+      if (this.#live.has(scheduled.seq)) heap.push(scheduled);
+    });
+    for (let next = heap.pop(); next !== undefined; next = heap.pop()) live.push(next);
+    return Object.freeze(live);
+  }
+
   isPending(seq: EventSeq): boolean {
     return this.#live.has(seq);
   }

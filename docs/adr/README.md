@@ -15,3 +15,6 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0009](0009-fault-plan-as-input.md) | Faults are scheduled input data; fault-plan events precede same-tick protocol events | Accepted (CP1) |
 | [0010](0010-network-fault-semantics.md) | Directed link faults decided at send; partitions checked at send and delivery | Accepted (CP1) |
 | [0011](0011-scheduler-heap-compaction.md) | Heap compaction with Floyd heapify (amends 0003) | Accepted (CP1) |
+| [0012](0012-invariant-model.md) | Invariants: pure online checkers over frozen views, explicit JSON history | Accepted (CP2) |
+| [0013](0013-violation-policies.md) | Stop-on-first by default, episode de-duplication, explainable violation records | Accepted (CP2) |
+| [0014](0014-fault-exploration-and-shrinking.md) | fast-check fault exploration, 1-minimal shrinking, stored counterexample fixtures | Accepted (CP2) |

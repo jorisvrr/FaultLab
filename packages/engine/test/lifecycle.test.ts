@@ -4,7 +4,7 @@ import { createHeartbeatProtocol, createPingProtocol } from '../src/fixtures';
 import type { JsonValue } from '../src/json';
 import { runSimulation, Simulation } from '../src/simulation';
 import type { TraceEntry } from '../src/trace';
-import { config, ofKind, protocol } from './helpers';
+import { config, mutabilityProblems, ofKind, protocol } from './helpers';
 import { checkTraceInvariants, storageFromTrace } from './invariants';
 
 const after = (trace: readonly TraceEntry[], index: number) => trace.slice(index + 1);
@@ -75,6 +75,25 @@ describe('node crash', () => {
 
   it('satisfies the lifecycle invariants', () => {
     expect(checkTraceInvariants(result.trace)).toEqual([]);
+  });
+});
+
+describe('trace immutability', () => {
+  it('deep-freezes every trace entry, including nested containers (regression: CP2 found shallow freezing)', () => {
+    const trace = runSimulation(
+      config(createHeartbeatProtocol({ interval: 20, timeout: 60 }), {
+        limits: { maxTime: 300 },
+        faults: [
+          { at: 30, type: 'link', from: 'n1', to: 'n2', loss: 0.5, delay: { min: 1, max: 4 } },
+          { at: 60, type: 'crash', node: 'n2' },
+          { at: 90, type: 'partition', groups: [['n3']] },
+          { at: 120, type: 'recover', node: 'n2' },
+          { at: 150, type: 'recover', node: 'n2' },
+        ],
+      }),
+    ).trace;
+    expect(ofKind(trace, 'node.crash')[0]?.cancelledTimers.length).toBeGreaterThan(0);
+    expect(mutabilityProblems(trace)).toEqual([]);
   });
 });
 

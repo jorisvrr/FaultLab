@@ -8,7 +8,7 @@ Each checkpoint ends with passing tests, updated docs, an updated [ENGINEERLOG.m
 
 Three independently modelled nodes · virtual clock · deterministic priority queue · seeded PRNG · messages delivered at scheduled virtual times · reproducible trace · defined ordering of simultaneous events · `maxEvents` · unit + property tests · identical traces for identical inputs · determinism documentation.
 
-## CP1 — Fault injection and node lifecycle
+## CP1 — Fault injection and node lifecycle ✅
 
 Design: [ADR-0008](adr/0008-node-lifecycle-persistence-incarnations.md) (lifecycle, persistence, incarnations), [ADR-0009](adr/0009-fault-plan-as-input.md) (fault plan), [ADR-0010](adr/0010-network-fault-semantics.md) (network faults, in-flight messages), [ADR-0011](adr/0011-scheduler-heap-compaction.md) (heap compaction). Semantics: [SEMANTICS §6–9](SEMANTICS.md).
 
@@ -25,12 +25,22 @@ Design: [ADR-0008](adr/0008-node-lifecycle-persistence-incarnations.md) (lifecyc
 9. All CP0 tests still pass, apart from deliberate trace-format changes (the CP0 golden updated together with an `ENGINE_VERSION` bump).
 10. ENGINEERLOG.md has a CP1 entry.
 
-## CP2 — Invariant checking
+## CP2 — Invariant checking, explainable violations, fault exploration ✅
 
-- `Invariant = { name, check(view) → ok | violation(detail) }`, evaluated after every step over a read-only global view (node states, storage, in-flight messages, time). The trace-level lifecycle checker written for CP1 tests is the seed of this.
-- Violations are trace entries; the policy can be stop or continue.
-- Bounded-liveness helpers (e.g. "a leader exists by t=…") are kept separate from safety invariants.
-- **Acceptance:** a deliberately buggy fixture protocol is caught; checkers cannot mutate state (frozen views); the cost per step is measured and documented.
+Design: [ADR-0012](adr/0012-invariant-model.md) (invariant model), [ADR-0013](adr/0013-violation-policies.md) (policies, explainable records), [ADR-0014](adr/0014-fault-exploration-and-shrinking.md) (exploration and shrinking). Bounded liveness is **deferred to CP4**.
+
+**Acceptance criteria:**
+
+1. Invariants are evaluated after every committed step, in configuration order, over a deeply frozen view; a graph-walk test proves runtime immutability, and mutation attempts are contained as `invariant.error` without changing the simulation.
+2. Historical invariants keep explicit, versioned, JSON history that is validated, frozen, and inspectable (snapshot-ready).
+3. `stop-on-first` (default) and `record-and-continue` policies; deterministic ordering of several outcomes in one step; one entry per violation episode; `maxViolations` bound; checker exceptions contained.
+4. Violation records are explainable: invariant id/version/name, nodes, expected, observed, evidence, cited references, trigger, step range, node state provenance, active faults (facts only), and the event number for replay.
+5. An in-flight message index stays consistent with the scheduler and the trace through sends, deliveries, loss, partitions, crashed receivers, fault transitions and termination (property-tested).
+6. Naive leader election converges to one stable leader in healthy runs with no false positives during startup; `single-leader` also holds under crash/recover-only plans; a partition after convergence produces a deterministic split-brain violation. *(Outcome: property testing also showed that per-epoch uniqueness can fail under crashes alone, a quorum problem that persistence cannot fix. Documented as a protocol weakness for CP4, not hidden.)*
+7. Exploration finds violations from random fault plans, shrinks them to valid, 1-minimal counterexamples, stores them as fixtures (seed, minimized config, invariant, fingerprint), and they replay exactly.
+8. With invariants disabled, traces project exactly onto the CP1 and CP0 golden fingerprints; old-version fixtures fail loudly instead of silently.
+9. Overhead with 0, 1 and 5 invariants is measured (median and spread).
+10. ADRs, docs, and a Dutch ENGINEERLOG entry for CP2.
 
 ## CP3 — Snapshots, replay, time travel
 
@@ -41,6 +51,7 @@ Design: [ADR-0008](adr/0008-node-lifecycle-persistence-incarnations.md) (lifecyc
 ## CP4 — Raft leader election
 
 - RequestVote/AppendEntries heartbeats; randomized election timeouts from `ctx.random`; `currentTerm` and `votedFor` in persistent storage.
+- **Bounded liveness checking** (deferred from CP2): properties like "a leader exists by t=…", evaluated at deadlines and reported separately from safety violations.
 - Invariants: **Election Safety** (≤ 1 leader per term); terms monotonic per node; a node votes at most once per term.
 - Thousands of seeds with random crash and partition plans. Failures are shrunk by fast-check to minimal fault plans.
 - **Acceptance:** zero safety violations across ≥ 10 000 randomized experiments; a known-bad variant (vote not persisted) is caught and shrunk.
@@ -66,6 +77,8 @@ Log Matching, Leader Completeness and State Machine Safety invariants; a client 
 ## CP9 — Performance engineering
 
 Profile before optimising. Targets: 100+ nodes, 10⁶+ events. Candidates: trace chunking/diff encoding, render LOD, typed-array event storage. Rust/WASM only if profiling proves the engine is the bottleneck.
+
+**Open investigation PERF-2 — invariant view construction.** With invariants enabled, ≈ 5 µs per step is spent building the frozen `SimulationView`, independent of the checkers (CP2 measurement: 528 → 1 026 ms per 100 000 events for one no-op invariant). Measurements are preserved in [TEST_STRATEGY, CP2 results](TEST_STRATEGY.md#runtime-verification-overhead) (0 / 1 / 5 invariants, plus the no-op decomposition showing that building the frozen view is the main cost). Candidates, to be decided only after profiling: reuse `NodeView` objects for nodes whose state/status/storage did not change (immutability makes reuse safe), avoid per-step closures, let invariants declare which entry kinds can affect them, and avoid re-validating unchanged history. **Constraint:** any optimisation must keep the same correctness and isolation guarantees with less allocation and copying, never by weakening them. Determinism and runtime immutability take precedence over speed, and the existing graph-walk, mutation-attempt and golden-fingerprint tests must pass unchanged.
 
 **Open investigation PERF-1 — CP1 latency outliers.** In the CP0-vs-CP1 A/B benchmark (200 000-event echo workload, 21 runs each), CP1 had a median of 477 ms but individual runs of 547–660 ms, which appeared more often than in CP0. It is *not* a correctness concern: traces are byte-identical across runs (determinism suite), so only wall-clock time varies. Hypotheses, none verified: (a) garbage collection pressure from larger trace entries (`incarnation` fields) and the per-handler storage object in `createNodeContext`; (b) JIT deoptimisation from the wider `TraceEntry` union; (c) machine noise. Plan: run with `--trace-gc` and `--cpu-prof`, compare allocation per event between CP0 and CP1, and repeat with more runs in a quieter environment. Decide on fixes only after profiling.
 

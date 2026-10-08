@@ -15,7 +15,8 @@
     "test": "npm run test --workspace @faultlab/engine",
     "coverage": "npm run coverage --workspace @faultlab/engine",
     "typecheck": "npm run typecheck --workspace @faultlab/engine",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test",
+    "test:explore": "npm run test:explore --workspace @faultlab/engine"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

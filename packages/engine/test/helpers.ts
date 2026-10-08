@@ -39,3 +39,27 @@ export function protocol(handlers: TestHandlers): Protocol {
 export function ofKind<K extends TraceEntry['kind']>(trace: readonly TraceEntry[], kind: K): Extract<TraceEntry, { kind: K }>[] {
   return trace.filter((entry): entry is Extract<TraceEntry, { kind: K }> => entry.kind === kind);
 }
+
+/**
+ * Walk everything reachable from `root` (calling getters) and report anything that is not
+ * frozen or is not plain data/functions. Used to prove runtime immutability, not just `readonly`.
+ */
+export function mutabilityProblems(root: unknown): string[] {
+  const problems: string[] = [];
+  const seen = new Set<object>();
+  const visit = (value: unknown, path: string): void => {
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null || seen.has(value)) return;
+    seen.add(value);
+    if (!Object.isFrozen(value)) problems.push(`${path} is not frozen`);
+    const proto: unknown = Object.getPrototypeOf(value);
+    if (![Object.prototype, Array.prototype, Function.prototype, null].includes(proto as object | null)) {
+      problems.push(`${path} is a ${(value as { constructor?: { name?: string } }).constructor?.name ?? 'non-plain object'}`);
+    }
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (typeof value === 'function' && ['length', 'name', 'prototype'].includes(key)) continue;
+      visit('value' in descriptor ? descriptor.value : descriptor.get?.call(value), `${path}.${key}`);
+    }
+  };
+  visit(root, '$');
+  return problems;
+}

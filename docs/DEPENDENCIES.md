@@ -11,7 +11,7 @@ Rule: a dependency must solve a problem we actually have, better than ~100 lines
 | `typescript` | ^7.0.2 | Strict static typing; TS 7 is the native (Go) compiler, ~10× faster checks. Its stricter defaults match ours. | — |
 | `vitest` | ^5.0.3 | Test runner; native TS/ESM, no transpile config; the same tool the Vite app will use. Requires Node ≥ 22.12. | Jest (needs a TS/ESM transform setup), `node:test` (weaker DX, no watch UI, no coverage integration) |
 | `@vitest/coverage-v8` | ^5.0.3 | Coverage via V8's built-in instrumentation (no source rewriting). | Istanbul provider (slower) |
-| `fast-check` | ^4.10.2 | Property-based testing with shrinking. Essential for a scheduler/PRNG/determinism suite, and later for shrinking failing fault plans. | Hand-rolled random tests (no shrinking), jsverify (unmaintained) |
+| `fast-check` | ^4.10.2 | Property-based testing with shrinking. Essential for a scheduler/PRNG/determinism suite, and since CP2 for fault-space exploration: generating fault plans, shrinking failures to minimal counterexamples (`test/explore.ts`). Seeded globally for a deterministic suite. | Hand-rolled random tests (no shrinking), jsverify (unmaintained) |
 | `@types/node` | ^24 | Types for `node:fs`/`node:path` in architecture tests only. **Not** visible to engine source (`types: []`). | — |
 
 ## Planned (added when their checkpoint starts, not before)
