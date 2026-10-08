@@ -14,6 +14,14 @@ Rule: a dependency must solve a problem we actually have, better than ~100 lines
 | `fast-check` | ^4.10.2 | Property-based testing with shrinking. Essential for a scheduler/PRNG/determinism suite, and since CP2 for fault-space exploration: generating fault plans, shrinking failures to minimal counterexamples (`test/explore.ts`). Seeded globally for a deterministic suite. | Hand-rolled random tests (no shrinking), jsverify (unmaintained) |
 | `@types/node` | ^24 | Types for `node:fs`/`node:path` in architecture tests only. **Not** visible to engine source (`types: []`). | — |
 
+## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
+
+| Package | Version | License | Why |
+|---|---|---|---|
+| `vite` | ^8.3.4 | MIT | Dev server and bundler for the prototype viewer; consumes the engine's TypeScript source directly |
+| `@fontsource-variable/geist`, `@fontsource-variable/geist-mono` | ^5.3.0 | OFL-1.1 | Self-hosted Geist fonts (approved typography), no third-party font CDN at runtime |
+| `@playwright/test` | ^1.64.0 | Apache-2.0 | End-to-end assertions in a real browser; uses the locally installed Chrome (`channel: 'chrome'`), so no browser download |
+
 ## Planned (added when their checkpoint starts, not before)
 
 | Package | Checkpoint | Purpose | Note |

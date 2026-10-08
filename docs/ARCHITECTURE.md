@@ -99,6 +99,10 @@ step():
  10. pending events > maxPendingEvents? → stop
 ```
 
+## 4.1 CP2.5 prototype viewer (`apps/demo`)
+
+A throwaway check that the engine works outside tests. It imports `@faultlab/engine` unchanged, **executes** a bounded experiment synchronously, and then **replays** the finished trace: the view is a pure function of (trace, cursor, display time) computed by `derive.ts`, which has no framework or DOM dependency. No engine internals are read; anything not derivable from the trace is not shown. The real UI (CP5/CP6) replaces everything here except, likely, `derive.ts`.
+
 ## 5. Planned boundaries (not built yet)
 
 - **Worker protocol (CP5).** Versioned discriminated-union messages in both directions, validated on receipt. The worker streams trace entries in chunks; the UI keeps an index of them. The worker never receives UI state.

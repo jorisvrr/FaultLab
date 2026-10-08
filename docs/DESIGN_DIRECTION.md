@@ -260,12 +260,21 @@ A violation view must keep **facts** and **inferences** visibly apart:
 
 Visual treatment follows §5.4: ember for the violation marker and the affected nodes, with shape and text labels always present.
 
+### 12.2 Usability findings to honour (from manual testing of the CP2.5 prototype)
+
+Full requirements in [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md).
+
+- **UX-001 — Confusing initial experiment state.** Separate *configuration* from *current state*; show the run lifecycle (ready / running / paused / completed / replaying); a default "initialized" view must be a real, labelled trace position; never fabricate states or hide skipped events.
+- **UX-002 — Controls below the viewport.** The time rail and transport (§4, §7 bottom panel) are **docked and always visible**; event markers on the rail are clickable and land on the exact entry; the stage never scrolls away while scrubbing.
+
+These shape the layout in §7. The bottom time rail is a fixed part of the viewport, not page content below the graph.
+
 ## 13. Phased visual implementation plan
 
 | Phase | After | Scope | Acceptance |
 |---|---|---|---|
 | **V0 Foundations** | CP5 | Tokens as CSS custom properties (both themes defined, dark shipped), type scale, spacing, radii, matte panel, pill button, metal disc button, focus styles | Contrast ratios re-verified in-browser; Storybook-free gallery page |
-| **V1 Precision tools** | V0 | Trace table (virtualised), inspector with JSON viewer, transport, clock readout, stop banner | Keyboard-only walkthrough; 100k-entry trace scrolls at 60 fps |
+| **V1 Precision tools** | V0 | Trace table (virtualised), inspector with JSON viewer, docked transport and time rail with clickable event markers, clock readout, run-lifecycle and stop banner | Keyboard-only walkthrough; 100k-entry trace scrolls at 60 fps; UX-001 and UX-002 acceptance checks pass ([UI_REQUIREMENTS](UI_REQUIREMENTS.md)) |
 | **V2 Graph (SVG)** | V1 | Circle layout, node glyphs, links, linear signals from the playback clock, selection, causal highlight | Rendering is a pure function of (trace, position): a test renders twice at the same position and compares the DOM. Frame budget measured |
 | **V3 Time** | V2 | Time rail, activity matrix, space-time diagram, run signature glyph | Scrubbing never triggers engine calls; glyph identical for identical runs |
 | **V4 Atmosphere** | V3 | Glass (constrained), grain layer, cursor, panel springs, staggered reveals; reduced-motion/transparency variants | Lighthouse a11y ≥ 95; no regression in V2 frame budget; reduced-motion audit |

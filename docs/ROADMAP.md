@@ -42,6 +42,16 @@ Design: [ADR-0012](adr/0012-invariant-model.md) (invariant model), [ADR-0013](ad
 9. Overhead with 0, 1 and 5 invariants is measured (median and spread).
 10. ADRs, docs, and a Dutch ENGINEERLOG entry for CP2.
 
+## CP2.5 — First reality check: a browser trace viewer (inserted; CP3 paused)
+
+A temporary prototype in `apps/demo`: Vite + plain TypeScript + SVG, the real engine **unchanged**, small bounded experiments executed on the main thread, then replayed. Presets: healthy network, crash/recovery/partition, partition after convergence; plus both stored counterexamples loaded from `packages/engine/test/counterexamples/`.
+
+- `src/derive.ts`: framework-independent, pure derivation of everything displayed from the trace alone; reusable when the React app arrives (CP5). Cross-checked against the live engine's own view after every step (all experiments + 40 random fault plans).
+- Playwright e2e (local Chrome): healthy leader, crash/recovery/partition, split-brain violation with explanation and fixture fingerprint, determinism across reloads, playback controls.
+- Manual verification (2026-10-08): crash of n2 at t=150, dropped messages, recovery at t=300 with incarnation 2 and updated storage, partition at t=400, heal at t=520, all visually confirmed.
+- UX findings **UX-001** (confusing initial state) and **UX-002** (controls below the viewport) are recorded in [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) for CP5/CP6; the prototype is intentionally not redesigned.
+- Integration findings are recorded in ENGINEERLOG (CP2.5). Main ones for CP5: export named trace-entry types from the engine; move shared experiments/fixtures out of the engine's `test/`; step-level vs entry-level cursor; indexed (not O(n)-per-frame) state derivation for large traces, which overlaps with CP3's state index.
+
 ## CP3 — Snapshots, replay, time travel
 
 - A snapshot captures **all** execution-relevant state: clock, scheduler heap and `nextSeq`, PRNG states, node runtimes (status, incarnation, state, storage, counters, timers), network conditions and partition, trace length.
@@ -58,13 +68,16 @@ Design: [ADR-0012](adr/0012-invariant-model.md) (invariant model), [ADR-0013](ad
 
 ## CP5 — Worker boundary and minimal UI shell
 
+**Must satisfy [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md): UX-001 (configuration vs. current state, explicit run lifecycle, honest initial position) and UX-002 (docked, always-visible playback controls and timeline with clickable event markers).**
+
+
 - `apps/web`: React + Vite. Simulation in a Web Worker; versioned, validated message protocol; trace streamed in chunks; wall-clock watchdog for runaway handlers; `Math.random`/`Date` stubbed inside the worker.
 - Unstyled but complete: configure, run, step, scrub, trace table, node inspector.
-- Playwright: smoke tests and cross-browser determinism (identical golden fingerprints in Chromium, Firefox, WebKit).
+- Playwright (introduced in CP2.5 against local Chrome): smoke tests and cross-browser determinism (identical golden fingerprints in Chromium, Firefox, WebKit).
 
 ## CP6 — Visual system and network visualisation
 
-Applies [DESIGN_DIRECTION.md](DESIGN_DIRECTION.md) phases V0–V3: tokens, primitives, graph renderer prototype (measured), timeline and space-time diagram, causal highlighting, fault visualisation.
+Applies [DESIGN_DIRECTION.md](DESIGN_DIRECTION.md) phases V0–V3: tokens, primitives, graph renderer prototype (measured), timeline and space-time diagram, causal highlighting, fault visualisation. Carries forward UX-001 and UX-002 and the timeline requirements in [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md).
 
 ## CP7 — Experiments: save, load, share
 

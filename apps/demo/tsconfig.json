@@ -1,0 +1,12 @@
+{
+  // The demo runs in the browser, so it gets DOM types. The engine keeps its own stricter
+  // tsconfig (no DOM); this config only type-checks the engine source as imported code.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"],
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src", "test", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+}

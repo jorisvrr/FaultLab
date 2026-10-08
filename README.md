@@ -86,9 +86,18 @@ Requires Node ≥ 22.12.
 
 ```bash
 npm install
-npm run check      # typecheck + all tests
+npm run check      # typecheck + all tests + demo build
 npm run coverage
 ```
+
+### See it in a browser (CP2.5 prototype)
+
+```bash
+npm run dev        # then open http://127.0.0.1:5173/
+npm run test:e2e   # Playwright checks against the locally installed Chrome
+```
+
+`apps/demo` is a temporary, deliberately plain trace viewer (Vite + TypeScript + SVG). It **executes** an experiment with the real engine in the page, then **replays** the completed trace. Every node state, message, crash, partition and violation on screen is derived from trace entries (`apps/demo/src/derive.ts`, cross-checked against the live engine after every step). It is not the final interface.
 
 ## Repository layout
 
@@ -98,6 +107,7 @@ packages/engine/        @faultlab/engine: zero runtime dependencies, no DOM, no 
   src/fixtures/         example protocols (ping, echo-forever)
   test/                 Vitest + fast-check suites; test/reference/ holds the C PRNG oracle
 docs/                   architecture, semantics, determinism, roadmap, ADRs, design direction
+apps/demo/              CP2.5 throwaway trace viewer (Vite + TS + SVG); derive.ts is the reusable part
 apps/web/               (CP5) React + Vite app, simulation in a Web Worker
 ```
 
@@ -115,6 +125,7 @@ apps/web/               (CP5) React + Vite app, simulation in a Web Worker
 | [ADRs](docs/adr/README.md) | Architecture decisions with alternatives and trade-offs |
 | [STUDY_GUIDE](docs/STUDY_GUIDE.md) | The algorithms to understand and exercises for each |
 | [DESIGN_DIRECTION](docs/DESIGN_DIRECTION.md) | Visual language for the future interface |
+| [UI_REQUIREMENTS](docs/UI_REQUIREMENTS.md) | Usability findings (UX-001, UX-002) and timeline requirements for the final frontend |
 
 ## Principles
 

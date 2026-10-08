@@ -1,0 +1,62 @@
+/* Tokens from docs/DESIGN_DIRECTION.md §5.2 (dark). Prototype styling only. */
+:root {
+  --bg-0: #0a0a0b; --surface-1: #17171a; --surface-2: #202024; --line: rgb(255 255 255 / 0.07);
+  --line-control: #64646c; --text-1: #ededea; --text-2: #a1a1a6; --text-3: #8a8a91; --ember: #ff6b3d;
+  --sans: 'Geist Variable', system-ui, sans-serif; --mono: 'Geist Mono Variable', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-0); color: var(--text-1); font: 14px/1.45 var(--sans); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.top { display: flex; gap: 16px; align-items: baseline; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.wordmark { font-size: 20px; letter-spacing: -0.02em; }
+.badge { font: 11px var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-3); }
+.engine { margin-left: auto; color: var(--text-3); font-size: 12px; }
+.grid { display: grid; grid-template-columns: 300px 1fr 340px; grid-template-rows: auto 300px; gap: 12px; padding: 12px; }
+.panel { background: var(--surface-1); border-radius: 14px; padding: 14px; min-width: 0; }
+.log { grid-column: 1 / -1; overflow: auto; }
+.label { font: 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin: 10px 0 6px; display: block; }
+select, button { font: inherit; color: var(--text-1); background: var(--surface-2); border: 1px solid var(--line-control); border-radius: 10px; padding: 6px 10px; }
+button:hover { border-color: var(--text-2); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--text-1); outline-offset: 2px; }
+button.primary { background: var(--text-1); color: var(--bg-0); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+.summary { color: var(--text-2); }
+.problem, .fail { color: var(--ember); }
+.ok { color: var(--text-1); }
+.muted { color: var(--text-3); }
+pre { white-space: pre-wrap; margin: 0; font-size: 12px; color: var(--text-2); }
+.run, .verify { font-size: 12px; color: var(--text-2); white-space: pre-wrap; }
+#graph { width: 100%; height: auto; display: block; }
+.readout { display: flex; gap: 16px; align-items: baseline; }
+.clock { font-size: 40px; font-weight: 250; letter-spacing: -0.02em; }
+.cursor, .stopped { color: var(--text-3); }
+.timeline { position: relative; height: 26px; background: var(--surface-2); border-radius: 8px; cursor: pointer; margin-top: 8px; }
+.timeline .mark { position: absolute; top: 3px; bottom: 3px; width: 2px; background: var(--ember); }
+.timeline .mark.violation { width: 8px; transform: translateX(-3px) rotate(45deg); top: 9px; bottom: auto; height: 8px; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text-1); }
+#log { list-style: none; margin: 0; padding: 0; font: 12px/1.6 var(--mono); }
+#log li { display: grid; grid-template-columns: 64px 64px 170px 1fr; gap: 8px; padding: 0 6px; border-radius: 4px; cursor: pointer; }
+#log li.future { opacity: 0.35; }
+#log li.current { background: var(--surface-2); color: var(--text-1); }
+#log li.fault, #log li.violation { color: var(--ember); }
+/* graph */
+.link { stroke: var(--line-control); stroke-width: 1; }
+.link.cut { stroke: var(--ember); stroke-dasharray: 3 6; }
+.link.degraded { stroke: var(--ember); stroke-dasharray: 1 4; }
+.node circle.body { fill: var(--surface-2); stroke: var(--text-2); stroke-width: 1.5; }
+.node.leader circle.body { fill: var(--text-1); }
+.node.crashed circle.body { fill: none; stroke: var(--ember); stroke-dasharray: 4 3; }
+.node .ring { fill: none; stroke: var(--ember); stroke-width: 3; }
+.node .select { fill: none; stroke: var(--text-1); stroke-width: 1; stroke-dasharray: 2 3; }
+.node text { fill: var(--text-1); font: 12px var(--mono); text-anchor: middle; }
+.node.leader text.id { fill: var(--bg-0); }
+.node text.sub { fill: var(--text-3); font-size: 11px; }
+.node text.cross { fill: var(--ember); font-size: 22px; }
+.node text.warn { fill: var(--ember); }
+.msg { fill: var(--text-1); }
+.drop { fill: var(--ember); font: 13px var(--mono); text-anchor: middle; }
+.partition-label { fill: var(--ember); font: 12px var(--mono); }
+.violation-box h3 { color: var(--ember); margin: 0 0 6px; font-size: 14px; }
+.violation-box dl { display: grid; grid-template-columns: 96px 1fr; gap: 2px 8px; margin: 0 0 10px; font-size: 12px; }
+.violation-box dt { color: var(--text-3); }
+.violation-box a, #inspector a { color: var(--text-1); }

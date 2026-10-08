@@ -912,3 +912,155 @@ Een "dure" functie is vaak duur door het klaarzetten van de invoer, niet door he
 - De zwaktes van het naive leader-protocol (split brain en hergebruik van epochs zonder quorum) zijn bewust niet opgelost; dat is de taak van Raft in CP4.
 - PERF-1 (uitschieters) en PERF-2 (kosten van de view) staan open voor CP9.
 - Exploratie is gericht zoeken, geen bewijs: niets vinden betekent niet dat er niets is.
+
+---
+
+## CP2.5 — Eerste realiteitscheck: FaultLab in de browser
+
+**Datum:** 2026-10-08 · **Status:** afgerond en goedgekeurd · **Engine-versie:** `0.3.0-cp2` (ongewijzigd)
+
+Tot nu toe bestond FaultLab alleen in tests. In CP2.5 draait de échte engine voor het eerst in een browser. Een kleine, tijdelijke viewer laat nodes, berichten, crashes, partities en invarianten-overtredingen zien. Het doel is niet de definitieve interface, maar controleren of de engine en een frontend goed samenwerken.
+
+### CP2.5.1 — Uitvoeren versus afspelen
+
+**1. Wat hebben we gebouwd?**
+Een prototype in `apps/demo` (Vite + gewone TypeScript + SVG) met vijf experimenten: een gezond netwerk, crash/herstel/partitie, een partitie na convergentie (split brain), en de twee opgeslagen tegenvoorbeelden uit CP2.
+
+**2. Waarom is dit nodig?**
+Tests bewijzen dat de engine klopt. Ze laten niet zien of je de output ook kúnt begrijpen en tonen. Een visualisatie die zelf gebeurtenissen "verzint", zou bovendien alles ondermijnen wat we tot nu toe gebouwd hebben.
+
+**3. Hoe werkt het?**
+De viewer heeft twee strikt gescheiden fases:
+1. **Uitvoeren (execute):** de echte `@faultlab/engine` draait het experiment helemaal af, in de browser, en levert een trace op. De experimenten zijn klein en begrensd, dus dit duurt maar een paar milliseconden.
+2. **Afspelen (replay):** alles op het scherm is een *pure functie* van (trace, cursor, weergavetijd). Afspelen roept de engine nooit aan en kan dus niets veranderen aan wat er gebeurd is.
+
+Berichten bewegen *lineair* in virtuele tijd tussen verzenden en aankomst. Een "versnellende" animatie zou de latency verkeerd weergeven.
+
+**4. Welke keuzes zijn gemaakt?**
+- Geen React en geen Three.js: dit is een wegwerp-prototype. Het herbruikbare deel is `derive.ts`, dat geen framework en geen DOM nodig heeft.
+- De engine is **niet aangepast** voor de visualisatie (gecontroleerd: nul wijzigingen in `packages/`).
+- Geist en Geist Mono worden lokaal meegeleverd (Fontsource, OFL-licentie), dus er is geen externe fontserver nodig.
+
+**5. Welke problemen kwamen we tegen?**
+Zie CP2.5.3.
+
+**6. Hoe hebben we het getest?**
+Zie CP2.5.2.
+
+**7. Wat heb ik hiervan geleerd?**
+"Live uitvoeren" en "terugkijken" zijn verschillende dingen. Als je ze scheidt, kan een visualisatie nooit de simulatie beïnvloeden.
+
+**8. Belangrijkste begrippen**
+- **Replay:** een vastgelegde uitvoering opnieuw bekijken.
+- **Pure functie:** dezelfde invoer geeft altijd dezelfde uitvoer, zonder bijwerkingen.
+- **Interpolatie:** een tussenpositie berekenen tussen twee bekende momenten.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan de afspeelsnelheid de uitkomst van de simulatie nooit veranderen?
+2. Een bericht staat op het scherm halverwege een verbinding. Is dat engine-state of een afgeleide weergave? Hoe wordt die positie berekend?
+
+### CP2.5.2 — Alleen tonen wat de trace kan bewijzen
+
+**1. Wat hebben we gebouwd?**
+`derive.ts` bouwt de toestand op elk punt van de trace opnieuw op: per node de status, incarnatie, state (en uit welke entry die komt) en opslag, plus de berichten onderweg, de actieve partitie en de linkfouten.
+
+**2. Waarom is dit nodig?**
+De opdracht was: toon alleen wat betrouwbaar uit de engine-output volgt. Dat moet je *bewijzen*, niet aannemen.
+
+**3. Hoe werkt het?**
+Een test laat de engine draaien met een "observator-invariant". Die krijgt na elke stap het gezaghebbende beeld van de engine zelf (de bevroren view uit CP2). Daarna moet `frameAt()` precies hetzelfde reconstrueren uit **alleen de trace**. We gebruiken dus de publieke invariant-API als meetinstrument.
+
+**4. Welke keuzes zijn gemaakt?**
+Waar een protocol samengevat wordt ("leader · epoch 2", "suspects n2"), komt dat rechtstreeks uit velden in de state. Er wordt niets geraden.
+
+**5. Welke problemen kwamen we tegen?**
+`frameAt()` loopt bij elk beeld de trace vanaf het begin door. Dat kost O(n) per frame: prima voor ±1.700 entries, niet voor een miljoen. Een geïndexeerde afleiding valt samen met de state-index die voor CP3 voorgesteld is.
+
+**6. Hoe hebben we het getest?**
+✅ De afleiding klopt na **elke stap** van alle vijf experimenten en van 40 willekeurige faultplannen. ✅ De opgeslagen tegenvoorbeelden geven ook in deze code dezelfde overtreding en vingerafdruk.
+
+**7. Wat heb ik hiervan geleerd?**
+"Toon alleen wat je kunt afleiden" is een eis die je kunt testen, door de afleiding na elke stap te vergelijken met de bron van waarheid.
+
+**8. Belangrijkste begrippen**
+- **Afgeleide toestand (derived state):** iets wat je uitrekent uit andere data, in plaats van het apart op te slaan.
+- **Oracle:** de gezaghebbende bron waarmee je vergelijkt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom gebruikt de test een invariant om de toestand van de engine vast te leggen?
+2. Waarom schaalt `frameAt()` slecht, en welke CP3-functionaliteit zou dat oplossen?
+
+### CP2.5.3 — Integratiebevindingen
+
+**1. Wat hebben we gebouwd?**
+Playwright-tests die in de lokaal geïnstalleerde Chrome het échte gedrag controleren, plus headless screenshots om zelf mee te kijken.
+
+**2. Waarom is dit nodig?**
+Een screenshot laat zien dát er iets staat. Een assertion bewijst dat het klopt: "n4 is leider", "drie verbindingen doorgesneden", "vingerafdruk komt overeen".
+
+**3. Hoe werkt het?**
+Elk belangrijk element heeft een `data-testid`. De tests klikken door de trace en controleren de getoonde toestand. Elke test faalt ook bij een onopgevangen JavaScript-fout in de pagina.
+
+**4. Welke keuzes zijn gemaakt?**
+Playwright gebruikt de Chrome die al op de laptop staat (`channel: 'chrome'`), zodat er geen browser gedownload hoeft te worden.
+
+**5. Welke problemen kwamen we tegen?** (de eigenlijke opbrengst van deze check)
+1. ✅ **De engine draaide meteen in de browser**, zonder één aanpassing. De CP0-keuze om de engine te compileren zónder browser- en Node-bibliotheken betaalde zich hier uit: er was niets te repareren. De gebundelde JavaScript is 52 kB (17 kB gzip), inclusief engine.
+2. ✅ **Een gat in de publieke API:** de engine exporteert het type `TraceEntry`, maar niet de losse entry-types (zoals de overtreding). Eerst voegde ik die exports toe, maar dat draaide ik terug, want de afspraak was: de engine niet aanpassen voor de visualisatie. De viewer gebruikt nu `Extract<TraceEntry, { kind: … }>`. Advies voor CP5: de types netjes exporteren.
+3. ✅ **Eerste browserrun: lege pagina.** Een fout in mijn viewer-code (elementen zonder `id`), niet in de engine. De console-uitvoer via Playwright wees het meteen aan.
+4. ✅ **Een leerzame "fout" in mijn eigen test.** Ik verwachtte bij de `node.recover`-entry al `boots: 2` te zien. Maar op dat punt heeft `init` nog niets vastgelegd: de `storage.write` is de entry erná, omdat opslag binnen een stap als eerste wordt vastgelegd. De viewer had dus gelijk. Les voor de UI: een cursor per *entry* is iets anders dan een cursor per *stap*.
+5. Twee kleine weergavefouten: het scrollen in het log scrolde de hele pagina mee, en het partitielabel werd afgeknipt. Beide verholpen, verder niet gepolijst.
+6. De opgeslagen tegenvoorbeelden staan in de `test/`-map van de engine. De demo importeert ze direct, zodat er één bron van waarheid blijft, maar voor CP5 horen gedeelde experimenten op een eigen plek.
+7. Het log is uitgebreid: 1.168 entries voor 421 events in het gezonde experiment. Een echte UI moet entries per stap kunnen groeperen en filteren.
+
+**6. Hoe hebben we het getest?**
+✅ 6 Playwright-tests geslaagd, 10 afleidingstests geslaagd, 313 engine-tests geslaagd, beide typechecks en de productie-build slagen. ✅ De split-brain-fixture geeft in Chrome dezelfde vingerafdruk (`c5be175f`) als in Node, en dezelfde vingerafdrukken na herladen en opnieuw uitvoeren. 💭 Chrome en Node gebruiken allebei de V8-engine; echte cross-browser-determinisme (Firefox en WebKit) staat nog gepland voor CP5.
+
+**7. Wat heb ik hiervan geleerd?**
+De eerste keer "echt draaien" levert andere informatie op dan tests: API-gaten, verwachtingen over volgorde, en hoe uitgebreid de data is.
+
+**8. Belangrijkste begrippen**
+- **End-to-end test:** het hele systeem testen zoals een gebruiker het ziet.
+- **Headless browser:** een browser zonder zichtbaar venster, bestuurd door code.
+- **Integratie:** de samenwerking tussen losse onderdelen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom draaide de engine zonder aanpassingen in de browser, en welke CP0-beslissing maakte dat mogelijk?
+2. Leg uit waarom `boots` bij de `node.recover`-entry nog 1 is, en wat dat betekent voor een tijdlijn in de UI.
+3. Waarom is een Playwright-assertion sterker bewijs dan een screenshot?
+
+### Starten
+
+```bash
+npm install
+npm run dev        # open http://127.0.0.1:5173/
+npm run test:e2e   # Playwright-controles in de lokale Chrome
+```
+
+### CP2.5 — Terugblik
+
+**Wat is handmatig getest?** Het scenario "Crash, recovery and partition" is in de browser met de hand doorlopen en visueel gecontroleerd (2026-10-08):
+- n2 crasht op t=150 en is duidelijk als gecrasht te herkennen;
+- berichten naar n2 worden gedropt en staan in het log;
+- n2 herstelt op t=300 met incarnatie 2, en de persistente opslag laat het herstel zien (`boots: 2`);
+- de partitie begint op t=400, de doorgesneden verbindingen zijn duidelijk zichtbaar, en op t=520 heelt het netwerk.
+
+Deze handmatige observaties komen bovenop de automatische tests (313 engine-tests, 10 afleidingstests en 6 Playwright-tests).
+
+**Wat werkte goed?** De échte engine stuurt een browserinterface aan zonder één aanpassing. Alles wat op het scherm staat, komt aantoonbaar uit de trace. Dezelfde invoer gaf in de browser dezelfde vingerafdruk als in Node.
+
+**Wat liet de integratie zien?** De scheiding "uitvoeren → afspelen" werkt. Een frontend kan de engine gebruiken zonder in zijn binnenkant te kijken. De zwakke plekken zitten in de *ervaring* en in de *schaal*, niet in de correctheid.
+
+**UX-bevindingen** (vastgelegd in `docs/UI_REQUIREMENTS.md`, voor CP5/CP6; het prototype wordt bewust níét aangepast):
+- **UX-001 — Verwarrende begintoestand.** Je kiest een experiment en de beschrijving praat al over de crash, maar alle nodes staan op "not started", omdat het afspelen bij entry #0 begint. Technisch klopt dat, maar het is verwarrend. De echte interface moet configuratie en huidige toestand duidelijk scheiden, altijd laten zien of een run *klaar*, *bezig*, *gepauzeerd* of *afgerond* is, en een eventuele "geïnitialiseerde" startpositie eerlijk benoemen als een echte positie in de trace.
+- **UX-002 — Bediening onder het zichtbare deel.** De netwerkweergave is te hoog, dus je moet scrollen om bij de knoppen en de tijdlijn te komen, en dan verdwijnen de bovenste nodes uit beeld. De echte interface krijgt een vaste tijdlijn met altijd zichtbare bediening en klikbare markeringen (crash, herstel, partitie, heal, overtreding) die naar de exacte trace-entry springen.
+
+**Wat betekent dit voor de verdere ontwikkeling?**
+1. Snel zoeken in een trace en de toestand op elk moment correct tonen moet efficiënt worden. Dat wordt een centraal onderdeel van CP3.
+2. Een tijdlijn moet bewust kiezen tussen stappen per *entry* en per *simulatiestap*.
+3. Interfacebeslissingen moeten getest worden met echte gebruikers, niet alleen met assertions: twee bruikbaarheidsproblemen vielen pas op toen een mens het gebruikte.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "alle nodes not started bij entry #0" correct, en waarom is het tóch een probleem? Hoe los je dat op zonder te liegen over de toestand?
+2. Waarom moet een klik op een tijdlijnmarkering naar een *entry* springen en niet naar een *tijdstip*?
+3. Welke drie dingen bewees CP2.5 over de engine, en welke twee dingen kon geen enkele automatische test ons vertellen?

@@ -6,17 +6,21 @@
   "author": "Joris van Rijn",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
-    "test": "npm run test --workspace @faultlab/engine",
+    "dev": "npm run dev --workspace @faultlab/demo",
+    "test": "npm run test --workspace @faultlab/engine && npm run test --workspace @faultlab/demo",
+    "test:explore": "npm run test:explore --workspace @faultlab/engine",
     "coverage": "npm run coverage --workspace @faultlab/engine",
-    "typecheck": "npm run typecheck --workspace @faultlab/engine",
-    "check": "npm run typecheck && npm run test",
-    "test:explore": "npm run test:explore --workspace @faultlab/engine"
+    "typecheck": "npm run typecheck --workspace @faultlab/engine && npm run typecheck --workspace @faultlab/demo",
+    "build:demo": "npm run build --workspace @faultlab/demo",
+    "check": "npm run typecheck && npm run test && npm run build:demo",
+    "test:e2e": "npm run test:e2e --workspace @faultlab/demo"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

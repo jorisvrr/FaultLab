@@ -96,6 +96,11 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP2.5 results (browser prototype)
+
+- **Derivation cross-check** (`apps/demo/test/derive.test.ts`, Vitest): after every step, the state reconstructed from the trace (node status, incarnation, state and its provenance, storage, in-flight messages, partition, link conditions) equals what the engine itself exposes to invariants. Covers all five experiments and 40 random fault plans; plus stored-fixture reproduction (violation time, nodes, event number, fingerprint) and boundedness.
+- **End-to-end** (`apps/demo/e2e/viewer.spec.ts`, Playwright on local Chrome, 6 tests): replay labelling and engine version; healthy single leader; crash → recovery (`boots` 1 → 2 exactly one entry after `node.recover`) → partition (3 cut links) → heal; split-brain violation highlighted and explained, fixture fingerprint `c5be175f` reproduced in the browser; identical fingerprints across reload and re-execution; playback controls never re-run the engine. Every test also fails on any uncaught page error.
+
 ## CP2 results
 
 313 tests passing (+2 fixture writers that run only in update mode) in 18 files; suite runtime ≈ 4.3 s. Coverage: 98.6% lines, 96.1% branches.

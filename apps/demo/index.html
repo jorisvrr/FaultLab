@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>FaultLab · CP2.5 trace viewer</title>
+  </head>
+  <body>
+    <header class="top">
+      <span class="wordmark">FaultLab</span>
+      <span class="badge" data-testid="mode-badge">CP2.5 prototype · replay of a completed trace</span>
+      <span class="engine mono" id="engine-version" data-testid="engine-version"></span>
+    </header>
+    <main class="grid">
+      <section class="panel left">
+        <label class="label" for="experiment">Experiment</label>
+        <select id="experiment" data-testid="experiment-select"></select>
+        <p class="summary" id="experiment-summary" data-testid="experiment-summary"></p>
+        <p class="problem" id="experiment-problem" data-testid="experiment-problem" hidden></p>
+        <div class="row">
+          <button id="execute" data-testid="execute">Execute again</button>
+          <button id="verify" data-testid="verify">Verify determinism</button>
+        </div>
+        <div class="run mono" id="run-info" data-testid="run-info"></div>
+        <div class="verify mono" id="verify-result" data-testid="verify-result"></div>
+        <h3 class="label">Inputs (from run.start)</h3>
+        <pre class="inputs mono" id="inputs" data-testid="inputs"></pre>
+      </section>
+      <section class="panel center">
+        <svg id="graph" data-testid="graph" viewBox="0 0 520 420" role="img" aria-label="Network of virtual nodes"></svg>
+        <div class="readout">
+          <span class="clock mono" id="clock" data-testid="clock">t 0</span>
+          <span class="cursor mono" id="cursor" data-testid="cursor">#0</span>
+          <span class="stopped mono" id="stop-reason" data-testid="stop-reason"></span>
+        </div>
+        <div class="timeline" id="timeline" data-testid="timeline"><div class="playhead" id="playhead"></div></div>
+        <div class="row transport">
+          <button id="restart" data-testid="restart" aria-label="Restart">⏮</button>
+          <button id="back" data-testid="step-back" aria-label="Step back">◀</button>
+          <button id="play" data-testid="play" class="primary" aria-label="Play">Play</button>
+          <button id="forward" data-testid="step-forward" aria-label="Step forward">▶</button>
+          <button id="end" data-testid="to-end" aria-label="To end">⏭</button>
+          <button id="jump" data-testid="jump-violation">Jump to violation</button>
+          <label class="label">speed
+            <select id="speed" data-testid="speed">
+              <option value="20">20 ticks/s</option>
+              <option value="60" selected>60 ticks/s</option>
+              <option value="200">200 ticks/s</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <section class="panel right">
+        <div id="violation" data-testid="violation-panel" hidden></div>
+        <div id="inspector" data-testid="inspector"><p class="muted">Click a node to inspect its derived state.</p></div>
+      </section>
+      <section class="panel log">
+        <h3 class="label">Event log (trace entries; dimmed = not yet reached)</h3>
+        <ol id="log" data-testid="event-log"></ol>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
