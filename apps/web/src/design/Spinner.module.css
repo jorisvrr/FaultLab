@@ -1,0 +1,28 @@
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent);
+  animation: spin 720ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/*
+ * Reduced motion: stop rotating rather than disappear. A full ring in the accent colour still
+ * reads as "busy", and `aria-busy` on the control carries the meaning regardless.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-color: var(--color-accent-dim);
+    border-top-color: var(--color-accent);
+    opacity: 0.8;
+  }
+}

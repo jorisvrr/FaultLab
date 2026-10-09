@@ -2216,3 +2216,104 @@ Er was nooit een lek. Het geheugen loopt na het opwarmen vlak op ongeveer 47,5 M
 2. Waarom kan één keer opruimen te weinig zijn, en wat heeft een Worker daarmee te maken?
 3. Wat is foutinjectie, en waarom is het nodig bij een test die anders altijd groen is?
 4. Wat is het verschil tussen een test repareren en een test zwakker maken — en aan welke kant valt deze wijziging?
+
+### CP6.8 — Gate 1 vastgelegd, en vooruitkijken naar het ontwerpsysteem
+
+**1. Wat is er vastgelegd?**
+Gate 1 is goedgekeurd en vastgelegd als commit `414c4d3`: de gebeeldhouwde knoop met zijn terugvalweergaven, de prototypegalerij, het toestandenmodel, de twee reparaties uit fase 0 en de herstelde geheugentest. 42 bestanden, 4 542 regels erbij.
+
+**2. Wat is de volgende stap?**
+Gate 2: het ontwerpsysteem. Niet de dashboards zelf, maar de bouwstenen waaruit Configure, Simulate en Investigate straks worden samengesteld — kleuren, typografie, oppervlakken, knoppen, panelen, overlays en bewegingsregels, met een aparte galerijpagina om ze te beoordelen.
+
+**3. Twee keuzes die ik nu al vastleg**
+- ✅ **Geen nieuwe bibliotheken.** CSS Modules zit al in Vite, de lettertypes staan al in het project. Voor dialoogvensters houd ik één uitzondering open: toegankelijke focusafhandeling is de plek waar zelfgeschreven code het vaakst misgaat. Ik schrijf het eerst zelf, test het met axe en met het toetsenbord, en neem alleen een bibliotheek als die test problemen vindt die ik niet goedkoop kan oplossen.
+- ⚠️ **Vervaging (`backdrop-filter`) boven het speelveld is verboden tijdens een run.** Een vervaagd paneel bovenop een canvas dat elk beeld opnieuw tekent, moet elk beeld opnieuw vervagen. Ik leg die regel vooraf vast en onderbouw hem met een meting, in plaats van er later achter te komen.
+
+**4. Wat nog open staat**
+Drie onderdelen uit de ontwerpen waarvan de betekenis onduidelijk is (de vijfpuntsindicator, de drie statusplaatjes, de blauwe stippen in de inspector). Ik bouw ze pas als vaststaat wát ze zeggen en uit welke gegevens dat komt. Blijkt er geen eerlijke betekenis te zijn, dan blijven ze decoratie — maar dan wel zó vormgegeven dat niemand ze voor een bedieningselement aanziet.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom bouw je eerst een ontwerpsysteem en pas daarna de schermen?
+2. Wat is het verschil tussen een ruwe kleurwaarde, een betekenisnaam en een componentwaarde, en waarom drie lagen?
+3. Waarom mag een storing (amber) er anders uitzien dan een schending van een invariant (roodoranje)?
+4. Waarom is "het staat niet in de referentie" geen reden om een onderdeel zomaar te verzinnen?
+
+## CP6 Gate 2 — Het ontwerpsysteem
+
+### CP6.9 — Drie lagen tokens, en een test die ze eerlijk houdt
+
+**1. Wat hebben we gebouwd?**
+De bouwstenen waaruit de drie schermen straks worden samengesteld: kleuren, typografie, oppervlakken, knoppen, formuliervelden, statusonderdelen, dialoogvensters, de applicatieschil en de tijdlijn. Plus een aparte galerijpagina (`design.html`) waarin elk onderdeel in elke toestand staat.
+
+**2. Waarom drie lagen?**
+- `--ref-*`: de ruwe waarden, opgemeten uit de referentiebeelden, genoemd naar wát ze zijn.
+- `--color-*` enzovoort: de betekenis, bijvoorbeeld "paneelvlak" of "storing".
+- Componentwaarden: alleen waar een onderdeel echt afwijkt.
+Componenten gebruiken uitsluitend de middelste laag. Verander ik het palet, dan hoef ik geen enkel component aan te raken.
+
+✅ **Drie tests houden het eerlijk:** elke gedocumenteerde naam bestaat in de stylesheet, elke betekenisnaam in de stylesheet is gedocumenteerd, en **geen enkel componentbestand grijpt langs de middelste laag heen naar een ruwe waarde**. Zonder die derde test sluipt er binnen een maand ergens een `--ref-` in een component, en dan is de hele opzet weg.
+
+**3. Een gemeten regel in plaats van een smaakregel**
+⚠️ `backdrop-filter` (matglas) boven het 3D-speelveld vervaagt élk beeld opnieuw, want het canvas tekent elk beeld opnieuw. Gemeten met een paneel bovenop het speelveld: in Firefox gaat de beeldtijd van 8 naar 13 ms, 62 procent duurder. In Chromium en WebKit zie je het níet, omdat die hier op 60 Hz vastzitten en het extra werk binnen het beeld past. Dat heb ik er expliciet bij geschreven: de meting bewijst dat de kosten bestaan, niet dat ze op die twee afwezig zijn.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Wat is het verschil tussen een ruwe kleurwaarde en een betekenisnaam, en waarom mag een component alleen de tweede gebruiken?
+2. Waarom is een vervaagd paneel boven een bewegend canvas duurder dan boven een stilstaande achtergrond?
+3. Waarom mag ik niet concluderen dat vervaging in Chromium gratis is?
+
+### CP6.10 — Vier echte fouten die de tests vonden
+
+**1. Waarom is dit het belangrijkste stukje van deze fase?**
+Omdat ik ze alle vier zélf had gebouwd en alle vier er goed uitzagen. Zonder toetsenbord- en toegankelijkheidstests waren ze alle vier blijven zitten.
+
+**2. De vier**
+- ✅ **De focusring stond uit op formuliervelden.** Ik liet in plaats daarvan de rand van het omhulsel oplichten. Dat is een zwakker signaal, en de toetsenbordtest ving het.
+- ✅ **De schakelaar was niet aanklikbaar.** Het echte selectievakje was 0 bij 0 beeldpunten; alleen het bijschrift werkte. Een muisklik precies op de schakelaar raakte niets, want het decoratieve baantje lag ervoor. Nu bedekt het vakje zijn baantje, onzichtbaar maar wél het bovenste laagje.
+- ✅ **Een weggeklikte tooltip stond nog in de toegankelijkheidsboom.** `opacity: 0` maakt iets doorzichtig, niet afwezig. Opgelost met `visibility`.
+- ⚠️ **WebKit gaf de focus niet terug na het sluiten van een dialoogvenster.** Eerst onderzocht in plaats van gerepareerd: WebKit geeft een knop bij een muisklik helemaal géén focus (zo werkt macOS). Er wás dus niets om naar terug te keren — en er gaat niets verloren, want focus teruggeven is er voor toetsenbordgebruikers, en bij hén staat de knop wél scherp. De test doet het nu via het toetsenbord.
+
+**3. Waarom native elementen?**
+Elk formulieronderdeel is een echt `<select>`, `<input>` of `<button>`. Pijltjestoetsen, Home en End, formulierkoppeling en de aankondiging aan een schermlezer komen dan van de browser. Het dialoogvenster is een echte `<dialog>` met `showModal()`: focusopsluiting, Esc, de bovenlaag en het onbereikbaar maken van de achtergrond zijn dan niet mijn code — precies de dingen waar zelfgebouwde dialoogvensters op stuklopen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is een rand die van kleur verandert een zwakkere focusaanwijzing dan een ring?
+2. Waarom is `opacity: 0` niet hetzelfde als verborgen?
+3. Wat betekent het dat ik een WebKit-verschil eerst heb verklaard en daarna pas de test heb aangepast in plaats van de code?
+4. Welke dingen krijg je gratis van een `<dialog>` met `showModal()`?
+
+### CP6.11 — De vijfpuntsindicator blijft decoratie
+
+**1. De beslissing**
+De vijf stipjes rechtsboven in het ontwerp zijn versiering. Geen knopentelling, geen teller van invarianten, geen laadbalk, geen gezondheidslampje.
+
+**2. Hoe leg je dat vast in code?**
+Het onderdeel is `aria-hidden`, heeft geen tabstop, geen muisaanwijzer-wijziging en geen reactie op zweven of klikken. Een ziende gebruiker ziet dus geen bedieningselement, en een schermlezer hoort er niets over. In de documentatie van het component staat opgesomd wat het níet betekent, zodat niemand er later stilletjes een betekenis aan geeft.
+
+⚠️ **De verleiding is om iets moois een functie te geven omdat het er functioneel uitziet.** Dat is precies hoe een instrument onbetrouwbaar wordt: dan staat er een lampje dat niets meet.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is versiering die op een bedieningselement lijkt erger dan geen versiering?
+2. Hoe voorkom ik dat een latere wijziging er alsnog betekenis aan hangt?
+
+### CP6.12 — Drie eindcontroles, en wat je pas ziet als je het openklapt
+
+**1. De versiering las als voortgang**
+De vijf stipjes hadden een grijze bol aan de ene kant en een oplichtende blauwe aan de andere. Dat leest als "stap 5 van 5". ⚠️ Precies de betekenis die Q11 verbiedt.
+De oplossing is niet "iets zachter maken" maar **symmetrie**: twee identieke neutrale bollen om drie open ringetjes heen. Een symmetrische figuur kán geen volgorde zijn. Daarbij is het blauw eruit, want blauw is in dit systeem de kleur van selectie en bediening — juist dát maakte één stip "actief".
+
+**2. Schermafbeeldingen van gesloten dialoogvensters bewijzen niets**
+De galerij liet alleen de knóppen zien, niet de geopende vensters. Toen ik ze wél vastlegde, vielen er twee echte fouten uit:
+- ⚠️ De eerste opnames toonden een niet-verduisterde achtergrond en een doorschijnend paneel. Oorzaak: ik legde vast tijdens de openingsanimatie. De test wacht nu op alle lopende animaties en controleert bovendien `:modal`, zodat een venster dat alleen "open" is maar niet modaal, zou falen.
+- ⚠️ De voettekst van de zijlade zweefde halverwege in plaats van onderaan. Opgelost door het venster een kolom te maken — en daarmee dook fout nummer twee op: **`display: flex` op een `<dialog>` overschrijft de `display: none` van de browser, zodat een gesloten venster zichtbaar blijft.** De bestaande Esc-test ving dat meteen.
+
+**3. Mobiel**
+Bij 390 beeldpunten bleek de navigatie in de kop afgeknipt: "Investigate" was onbereikbaar. De modi schuiven nu horizontaal binnen de kop, en de test eist dat elke modus bereikbaar blijft op elk formaat.
+
+**4. Wat ik hiervan leer**
+✅ Een onderdeel dat je alleen in rust bekijkt, is niet gecontroleerd. De drie fouten hierboven zaten alle drie in een tóestand — tijdens animeren, in de open stand, op een smal scherm — en geen ervan was zichtbaar in de galerij zoals die er stond.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan een symmetrische figuur geen voortgang uitdrukken, en waarom is dat een betere oplossing dan "zachtere kleuren"?
+2. Waarom overschrijft `display: flex` op een `<dialog>` het verbergen door de browser, en hoe voorkom je dat?
+3. Waarom is wachten op animaties nodig vóór je een schermafbeelding maakt, en wat had ik anders fout geconcludeerd?
+4. Waarom is "het past binnen het scherm" niet hetzelfde als "het werkt op een telefoon"?

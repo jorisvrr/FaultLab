@@ -138,8 +138,11 @@ step():
 | State inspection | `apps/web` `Session`, `useFrame` | main |
 | Rendering and animation | `apps/web` components (minimal in CP5; CP6 visual system) | main |
 | Sculptural rendering (CP6) | `apps/web/src/stage`: pure visual model → R3F stage (full / reduced) or SVG (flat), one WebGL context, ADR-0025 | main |
+| Design system (CP6 Gate 2) | `apps/web/src/design`: tokens (CSS custom properties, three layers) + components (CSS Modules). Presentation only | main |
 
 Package dependencies (runtime): `engine` ← `protocols` ← `experiments` ← `runtime` ← `web`; `trace` uses engine types only. No package below `web` imports React (architecture test).
+
+**The design system is a leaf too.** Nothing in `apps/web/src/design` imports the engine, runtime, trace index or `Session`; components receive props. That is what lets the gallery (`design.html`) render every state without a simulation, and it keeps presentation decisions out of the simulation's way.
 
 **The stage is a leaf.** `apps/web/src/stage` imports nothing from the engine, runtime, trace or `Session`: it is handed node sprites (position, radius, lighting, state) and draws them. Rendering frequency therefore cannot influence execution or reconstruction, and the visual model is unit-tested without a browser.
 

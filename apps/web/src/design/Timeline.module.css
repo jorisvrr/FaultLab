@@ -1,0 +1,159 @@
+/*
+ * Timeline primitives: axis, ticks, markers, selection. GEOMETRY AND APPEARANCE ONLY.
+ * No playback logic, no clock, no trace knowledge — Gate 4 supplies the data and the
+ * PlaybackClock. These exist so the dashboards are assembled from reviewed parts.
+ */
+
+.timeline {
+  position: relative;
+  width: 100%;
+  padding: var(--space-5) 0 var(--space-6);
+  user-select: none;
+}
+
+.axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.tick {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  width: 1px;
+  height: 9px;
+  background: var(--color-border-strong);
+}
+
+.tickLabel {
+  position: absolute;
+  top: calc(50% + 13px);
+  translate: -50% 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A marker is a real button: clickable, focusable, and named for assistive technology. */
+.marker {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  /* The dot is 7 px; the target is 26 px, so it stays comfortably clickable and tappable. */
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.markerDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+  transition: transform var(--motion-base) var(--motion-ease), background-color var(--motion-base) var(--motion-ease);
+}
+.marker:hover .markerDot {
+  transform: scale(1.3);
+  background: var(--color-text);
+}
+
+.marker[data-tone='accent'] .markerDot {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px -1px var(--color-accent);
+}
+.marker[data-tone='fault'] .markerDot {
+  background: var(--color-state-fault);
+  box-shadow: 0 0 8px -1px var(--color-state-fault);
+}
+/* A violation is also square, so it is distinguishable without colour. */
+.marker[data-tone='violation'] .markerDot {
+  background: var(--color-state-violation);
+  border-radius: 2px;
+  box-shadow: 0 0 9px -1px var(--color-state-violation);
+}
+/* Recovery: a hollow ring, distinct in shape from a fault's filled dot. */
+.marker[data-tone='recovery'] .markerDot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--color-state-recovery);
+}
+
+.playhead {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+}
+.playheadRing {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow:
+    0 0 0 4px rgb(173 200 254 / 0.16),
+    0 0 14px -2px var(--color-accent);
+}
+.playheadLabel {
+  position: absolute;
+  /* Below the tick labels, so the selected position never collides with a tick. */
+  top: 34px;
+  translate: 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The scrub input lies over the axis: native range semantics, invisible thumb. */
+.scrub {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.scrub::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+.scrub::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+.scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+.scrub::-moz-range-thumb {
+  width: 18px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+.scrub:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-control);
+}

@@ -1,0 +1,233 @@
+/* Application shell, header, backdrop and tabs. */
+
+.shell {
+  display: grid;
+  grid-template-rows: var(--header-height) minmax(0, 1fr) auto;
+  height: 100dvh;
+  position: relative;
+  isolation: isolate;
+}
+
+/* ── backdrop ────────────────────────────────────────────────────────────────────────────── */
+/*
+ * Static and passive: a void gradient, an ultra-thin structural grid and decorative orbit
+ * arcs. It never encodes simulation state — nothing here may be mistaken for data.
+ */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-background);
+  background: var(--color-void);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-grid);
+  background-image: linear-gradient(90deg, rgb(255 255 255 / 0.028) 1px, transparent 1px);
+  background-size: 96px 100%;
+  mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+}
+
+.atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-background);
+  background: var(--gradient-stage);
+}
+
+.orbits {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-orbits);
+  color: rgb(255 255 255 / 0.05);
+}
+
+/* ── header ──────────────────────────────────────────────────────────────────────────────── */
+.header {
+  position: relative;
+  z-index: var(--z-panels);
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0 var(--space-margin);
+  min-width: 0;
+}
+
+/*
+ * The thin guide line under the identity row, measured at y ≈ 57 in the references. It fades
+ * at both ends rather than meeting the edges.
+ */
+.header::after {
+  content: '';
+  position: absolute;
+  left: 100px;
+  right: 180px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(255 246 234 / 0.26) 18%, rgb(255 246 234 / 0.26) 76%, transparent);
+}
+
+/*
+ * Branding slot. Sized from the reference (mark 42 × 40, wordmark beside it) and reserved
+ * through tokens, so the final logo is a file swap with no layout change.
+ */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius-control);
+}
+
+.brandMark {
+  flex: none;
+  width: var(--brand-mark-width, 42px);
+  height: var(--brand-mark-height, 40px);
+  display: grid;
+  place-items: center;
+}
+
+/* Temporary placeholder: a neutral bead, clearly not a finished identity. */
+.brandPlaceholder {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background:
+    radial-gradient(60% 60% at 34% 28%, rgb(255 255 255 / 0.5) 0%, rgb(255 255 255 / 0) 62%),
+    linear-gradient(180deg, #23262a 0%, #0a0b0c 100%);
+  box-shadow: inset 0 0 0 1px rgb(255 248 240 / 0.16);
+}
+
+.wordmark {
+  font-family: var(--font-sans);
+  font-size: var(--type-display-size);
+  font-weight: 400;
+  letter-spacing: var(--type-tracking-tight);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: var(--space-5);
+  /* On a narrow viewport the modes scroll inside the header rather than being clipped off
+     the edge: every mode has to stay reachable, including by touch. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav::-webkit-scrollbar {
+  display: none;
+}
+.navLink {
+  flex: none;
+}
+
+.navLink {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  color: var(--color-text-subtle);
+  text-decoration: none;
+  transition: color var(--motion-base) var(--motion-ease), background-color var(--motion-base) var(--motion-ease);
+}
+.navLink:hover {
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.04);
+}
+.navLink[aria-current='page'] {
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: var(--shadow-inset-control);
+}
+
+.headerEnd {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.main {
+  position: relative;
+  z-index: var(--z-panels);
+  min-height: 0;
+  padding: var(--space-3) var(--space-margin) var(--space-4);
+}
+
+.dock {
+  position: relative;
+  z-index: var(--z-dock);
+  padding: 0 var(--space-margin) var(--space-margin);
+}
+
+/* ── tabs ────────────────────────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.tab {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  cursor: pointer;
+  transition: color var(--motion-base) var(--motion-ease);
+}
+.tab:hover {
+  color: var(--color-text);
+}
+.tab[aria-selected='true'] {
+  color: var(--color-text);
+}
+.tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: -1px;
+  height: 1px;
+  background: var(--color-accent);
+  box-shadow: 0 0 10px -1px var(--color-accent);
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .header {
+    padding: 0 var(--space-4);
+    gap: var(--space-3);
+  }
+  .header::after {
+    left: var(--space-4);
+    right: var(--space-4);
+  }
+  .nav {
+    margin-left: 0;
+  }
+  .main,
+  .dock {
+    padding-inline: var(--space-4);
+  }
+}
+
+@media (max-width: 560px) {
+  .wordmark {
+    display: none; /* the mark stays; the slot keeps its size */
+  }
+  .navLink {
+    padding: var(--space-2);
+  }
+}

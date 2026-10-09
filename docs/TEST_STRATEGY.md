@@ -98,6 +98,23 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP6 results (Gate 2: design system)
+
+**Tests:** 762 unit tests (+6 token tests) and 102 browser tests across Chromium, Firefox and WebKit (98 passing, 4 skipped where no heap API exists). Full report: [CP6_GATE2_DESIGN_SYSTEM.md](CP6_GATE2_DESIGN_SYSTEM.md).
+
+| Layer | What it proves | Where |
+|---|---|---|
+| Token integrity | Every documented token is declared; every declared semantic token is documented; **no component stylesheet reaches past the semantic layer into `--ref-*`**; every documented colour pairing meets WCAG 2.2 AA (measured 6.33–17.16 : 1); the fault and violation hues stay > 15° apart | `apps/web/test/tokens.test.ts` |
+| Gallery integrity | All ten sections render; both font families actually loaded; no page errors and no failed requests | `e2e/design-system.spec.ts` |
+| Accessibility | axe-core (`wcag2a/aa`, `wcag21a/aa`, `wcag22aa`, `best-practice`): **0 violations, 43 rules passing** in all three engines. `color-contrast` is *incomplete* there because axe cannot measure through a blur; the token test covers it deterministically | same |
+| Keyboard | Every control reachable with a visible `:focus-visible` ring; Space toggles the switch; arrows move within the segmented control and tabs with Home/End; arrows step the number field and range | same |
+| Dialogs | Focus moves in, is contained over 12 tabs, Esc closes, focus returns to the opener, the background is inert, nothing is left behind; backdrop and close button both dismiss | same |
+| Reduced motion | All three duration tokens become 0 and the spinner stops rotating while staying visible | same |
+| Responsive | Five viewports (1586/1440/1280/768/390): no horizontal overflow anywhere; no interactive control under 24 px at ≤ 768 px | same |
+| Surface cost | Glass vs matte over the live 3D stage, alternated three times per engine: Firefox 8 → 13 ms p50 (+62 %); Chromium and WebKit vsync-limited at ~17 ms, so the cost is real but invisible there | `e2e/surface-cost.spec.ts` |
+
+Four real defects were found by these tests and fixed: a suppressed focus ring on native controls, a switch whose input was unclickable, a dismissed tooltip still present in the accessibility tree, and WebKit's focus restoration after a dialog (diagnosed as a platform convention, not patched over). Details in the Gate 2 report §8.
+
 ## CP6 results (Gate 1: regression fixes and the node prototype)
 
 **Tests:** 756 passing (engine 420, trace 23, protocols 184, experiments 49, runtime 55, demo 10, web 15) plus the CP5 fixture writers; all typechecks and the production build pass. Playwright (production build, Chromium = Chrome 154, Firefox 157.0, WebKit 27.2): 14 CP5 tests + 2 CP6 regression tests + 6 prototype tests, each in three engines. Full report: [CP6_GATE1_NODE.md](CP6_GATE1_NODE.md).

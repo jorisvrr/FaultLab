@@ -87,6 +87,16 @@ Two defects found by the Gate 0 investigation, fixed and covered by tests ([CP6_
 - **UX-003 — Investigate froze during live inspection.** The cause chain of the newest entry was rendered in full; with heartbeat-heavy Raft it reaches ≈ 8 000 entries and grows with the run. All engines degraded, WebKit worst (one 8.9 s frame). Cause chains, consequences and the markers list are now windowed: the full chain is always reachable (length shown, scrolling, jumps to the nearest cause and to `run.start`), only the visible rows are in the DOM. **Requirement for every CP6 surface: no list may render an unbounded number of rows.**
 - **UX-004 — Controls reverted for one frame.** Controlled inputs showed the previous value until the next animation frame. `Session` now notifies user-initiated changes synchronously and keeps coalescing Worker data. **Requirement: a control must show the user's intended state within the same event.**
 
+## CP6 Gate 2 design-system rules (binding on every later gate)
+
+1. **Semantic tokens only.** A component may use `--color-*`, `--space-*`, `--type-*`, `--motion-*`, `--z-*`, `--radius-*`, `--shadow-*`, `--focus-*`. Reaching into `--ref-*` is a test failure.
+2. **Matte over the live stage.** A panel overlapping the 3D stage uses `material="matte"`; `backdrop-filter` re-blurs every frame over a canvas that repaints every frame (measured: +62 % frame time where the display allows it to show).
+3. **Native elements.** Every control wraps a real `select`, `input`, `button` or `dialog`. Keyboard behaviour, form association and assistive-technology semantics are not re-implemented.
+4. **Never colour alone.** Every status tone also changes glyph or shape, and the text says what it means. Amber = injected fault; red-orange = invariant violation or error.
+5. **Legibility beats the PNG.** Where the reference is dimmer or smaller than readable, readability wins and the difference is documented.
+6. **Decoration must not look interactive.** The five-dot motif (Q11) is `aria-hidden`, unfocusable and inert; anything decorative follows the same rule.
+7. **No unbounded lists** (carried over from UX-003).
+
 ## CP5 status and constraints for the final frontend (CP6)
 
 **Implemented functionally in CP5** (`apps/web`, minimal styling, not the final design): the three modes (Configure, Simulate, Investigate); UX-001 (explicit lifecycle badge incl. pending pause/stop, "live" vs "replay" wording, configuration shown separately from current state); UX-002 (docked playback bar that never scrolls away, verified at 1200×600); marker navigation to exact entries; node inspection verified against the Worker engine's own snapshots; keyboard operation (Space, ←/→, Shift+←/→, [ ], Home/End, F) with accessible names on every control.

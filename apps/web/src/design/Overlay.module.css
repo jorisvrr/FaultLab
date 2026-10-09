@@ -1,0 +1,168 @@
+/* Tooltip, dialog and drawer. */
+
+.tooltipWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  translate: -50% 0;
+  z-index: var(--z-tooltip);
+  max-width: 34ch;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-float);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--type-micro-size);
+  line-height: 1.45;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  /* `visibility` as well as opacity: a transparent element is still in the accessibility tree
+     and still "visible" to a test, which is not what dismissed means. */
+  visibility: hidden;
+  transition:
+    opacity var(--motion-base) var(--motion-ease),
+    visibility var(--motion-base);
+}
+.tooltipOpen {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ── dialog ──────────────────────────────────────────────────────────────────────────────── */
+/*
+ * A native <dialog> opened with showModal(): the browser supplies the top layer, the modal
+ * backdrop, focus containment, Esc, and `inert` on everything behind it. Re-implementing those
+ * in JavaScript is exactly where hand-written dialogs go wrong.
+ */
+.dialog {
+  margin: auto;
+  padding: 0;
+  width: min(560px, calc(100vw - 2 * var(--space-5)));
+  max-height: min(80dvh, 720px);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-panel);
+  box-shadow: var(--shadow-inset-panel), var(--shadow-float);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.dialog::backdrop {
+  background: rgb(3 4 5 / 0.72);
+  backdrop-filter: blur(2px);
+}
+
+/*
+ * A column, so the content area takes the slack and the footer stays at the bottom — which
+ * matters for a full-height side drawer. Scoped to [open], because a bare `display` here
+ * would override the UA's `display: none` and leave a CLOSED dialog on screen.
+ */
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
+  animation: dialogIn var(--motion-slow) var(--motion-ease-out);
+}
+.dialog[open]::backdrop {
+  animation: backdropIn var(--motion-slow) var(--motion-ease);
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A drawer is the same dialog docked to an edge. */
+.drawer {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: none;
+  width: min(460px, calc(100vw - var(--space-6)));
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
+}
+.drawer[open] {
+  animation: drawerIn var(--motion-slow) var(--motion-ease-out);
+}
+@keyframes drawerIn {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+/* A drawer docked to the bottom: the event log. */
+.drawerBottom {
+  margin: auto auto 0;
+  width: min(100vw, 100%);
+  height: min(60dvh, 520px);
+  max-height: none;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+}
+.drawerBottom[open] {
+  animation: drawerUp var(--motion-slow) var(--motion-ease-out);
+}
+@keyframes drawerUp {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-title-size);
+  font-weight: 400;
+  letter-spacing: var(--type-tracking-tight);
+}
+
+.close {
+  margin-left: auto;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.foot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open],
+  .dialog[open]::backdrop {
+    animation: none;
+  }
+}

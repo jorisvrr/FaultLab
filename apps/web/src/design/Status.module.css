@@ -1,0 +1,213 @@
+/*
+ * Status surfaces: chips, badges, dots, value cells, fact tables, empty states.
+ *
+ * Rule that governs all of them: status is never carried by colour alone. Every tone also
+ * changes the glyph, and the text says what it means.
+ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  min-height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-control);
+  box-shadow: var(--shadow-inset-control);
+  font-family: var(--font-mono);
+  font-size: var(--type-card-size);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.chipGlyph {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  height: 10px;
+  color: currentColor;
+}
+
+.neutral {
+  color: var(--color-text-muted);
+}
+.accent {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+.fault {
+  color: var(--color-state-fault);
+  border-color: rgb(248 199 129 / 0.35);
+}
+.violation {
+  color: var(--color-state-violation);
+  border-color: rgb(239 116 81 / 0.45);
+  background: rgb(239 116 81 / 0.06);
+}
+.ok {
+  color: var(--color-state-ok);
+}
+
+/* ── a bare dot, for inline use inside a sentence or a table cell ────────────────────────── */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dotHollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+/* ── decorative motif (Q11) ─────────────────────────────────────────────────────────────── */
+/*
+ * Approved as DECORATION. It is not a node count, an invariant counter, a progress bar or a
+ * health indicator, and it must not look like a control: no pointer cursor, no hover response,
+ * no focus, aria-hidden.
+ *
+ * The reference pairs a grey dot at one end with a glowing blue one at the other, which reads
+ * as "step 5 of 5" or a range. This version keeps the reference's composition — a pill holding
+ * large, small, small, small, large — but makes the two ends IDENTICAL and drops the accent
+ * colour. A symmetric figure cannot be read as a sequence, and without blue (our selection and
+ * interaction colour) nothing in it suggests an active state.
+ */
+.motif {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+}
+.motifEnd {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgb(196 207 217 / 0.5) 0%, rgb(139 148 158 / 0.42) 100%);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.22);
+}
+.motifRing {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-text-subtle);
+  opacity: 0.55;
+}
+
+/* ── value cell: a read-only historical value ────────────────────────────────────────────── */
+.valueRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.valueKey {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.lock {
+  flex: none;
+  color: var(--color-text-subtle);
+  opacity: 0.8;
+}
+
+.valueCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  background: var(--color-surface-control);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-inset-control);
+  font-family: var(--font-mono);
+  font-size: var(--type-value-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.valueMissing {
+  color: var(--color-text-subtle);
+  font-style: normal;
+}
+
+/* ── fact table ──────────────────────────────────────────────────────────────────────────── */
+.facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  /* Row pitch measured on the reference: 23 px, carried by line-height rather than a gap. */
+  gap: 0 var(--space-4);
+  line-height: 23px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+}
+.factKey {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.factValue {
+  margin: 0;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ── empty state ─────────────────────────────────────────────────────────────────────────── */
+.empty {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-card);
+  color: var(--color-text-subtle);
+}
+.emptyTitle {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  color: var(--color-text-muted);
+}
+.emptyBody {
+  margin: 0;
+  font-size: var(--type-body-size);
+  max-width: 48ch;
+}
+
+/* ── divider with a label ────────────────────────────────────────────────────────────────── */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+.legend::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-divider);
+}

@@ -45,6 +45,15 @@ Exact versions, because a shader and a renderer are sensitive to minor releases.
 
 Conditionally approved but **not yet added**: `@react-three/drei` (not needed: one geometry, one material), `postprocessing` (bloom: a measured experiment first), `motion` (transitions are a 20-line exponential approach on plain numbers). Still not added: a router, a state library, a component library.
 
+### Gate 2 additions
+
+| Package | Version | License | Where | Why |
+|---|---|---|---|---|
+| `@fontsource-variable/geist`, `@fontsource-variable/geist-mono` | 5.3.0 (exact) | OFL-1.1 | `apps/web` (dependency) | The approved typefaces, self-hosted. Already present for the CP2.5 demo, so no new third party and no font CDN at runtime. 56 KB for the two latin files |
+| `@axe-core/playwright` | 4.11.0 (exact) | MPL-2.0 | `apps/web` (dev) | Automated accessibility checks over the component gallery, in all three engines. Test-only; never shipped |
+
+**Nothing else.** CSS Modules are built into Vite. No component library (the references' controls are too specific to adapt one). No state library, no animation library, no router. Radix was considered for dialogs and **not needed**: the native `<dialog>` with `showModal()` supplies focus containment, Esc, the top layer and an inert background, and the remaining gaps are covered by tests in three engines (see [CP6_GATE2_DESIGN_SYSTEM.md](CP6_GATE2_DESIGN_SYSTEM.md) §8). Revisit only if that implementation becomes fragile.
+
 ## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
 
 | Package | Version | License | Why |

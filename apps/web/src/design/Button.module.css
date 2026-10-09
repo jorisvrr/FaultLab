@@ -1,0 +1,164 @@
+/*
+ * Buttons.
+ *
+ * `primary`   the Configure CTA. Measured on the reference: a 1 px near-white top edge
+ *             (#fafafc), a vertical gradient #edf5ff → #99afe0, and a second bright edge at the
+ *             BOTTOM (#dfebfc) — a rim light, not a drop shadow. Both edges are what make it
+ *             look like a lit physical object instead of a blue rectangle.
+ * `secondary` metallic control surface: raised, thin lit top edge, dark body.
+ * `ghost`     text only, for low-weight actions.
+ * `icon`      square, same material as secondary.
+ */
+.button {
+  --_height: 36px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--_height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-control);
+  box-shadow: var(--shadow-inset-control);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  line-height: 1;
+  letter-spacing: var(--type-tracking-tight);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-base) var(--motion-ease),
+    border-color var(--motion-base) var(--motion-ease),
+    color var(--motion-base) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-base) var(--motion-ease);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--color-surface-control-hover);
+  border-color: var(--color-border-strong);
+}
+
+.button:active:not(:disabled) {
+  box-shadow: var(--shadow-press);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  color: var(--color-text-disabled);
+  border-color: var(--color-divider);
+  background: var(--color-surface-panel);
+  box-shadow: none;
+}
+
+/* ── primary ─────────────────────────────────────────────────────────────────────────────── */
+.primary {
+  --_height: 48px;
+  --_disc: 30px;
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--gradient-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--type-value-size);
+  /* Top and bottom rim lights, both measured on the reference. */
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.92),
+    inset 0 -1px 0 0 rgb(230 240 255 / 0.75),
+    0 10px 26px -12px rgb(156 182 235 / 0.55);
+}
+
+.primary:hover:not(:disabled) {
+  /* The sheen brightens; nothing moves. */
+  filter: brightness(1.06);
+}
+
+.primary:active:not(:disabled) {
+  filter: brightness(0.97);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.6),
+    inset 0 2px 6px 0 rgb(16 23 35 / 0.35);
+}
+
+.primary:disabled {
+  background: var(--color-surface-control);
+  color: var(--color-text-disabled);
+  box-shadow: var(--shadow-inset-control);
+  filter: none;
+}
+
+/* The dark disc that holds the CTA's glyph in the reference. */
+.disc {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--_disc, 30px);
+  height: var(--_disc, 30px);
+  font-size: calc(var(--_disc, 30px) * 0.36);
+  margin-left: calc(var(--space-2) * -1);
+  border-radius: 50%;
+  background: var(--color-accent-surface);
+  color: var(--color-accent-bright);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.12);
+}
+
+/*
+ * `lg` is the Configure CTA's size, measured on the reference: 97 px tall with a 46 px disc.
+ * It is a real size in the system, not a one-off override in a dashboard.
+ */
+.lg {
+  --_height: 97px;
+  --_disc: 46px;
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
+  font-size: var(--type-title-size);
+}
+.lg .disc {
+  margin-left: 0;
+}
+
+/* ── ghost / icon ────────────────────────────────────────────────────────────────────────── */
+.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-muted);
+}
+.ghost:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.05);
+  border-color: transparent;
+  color: var(--color-text);
+}
+
+.icon {
+  padding: 0;
+  width: var(--_height);
+  min-width: var(--_height);
+}
+
+/* Transport play: a disc with the accent ring, as in the replay dock. */
+.transport {
+  --_height: 40px;
+  width: var(--_height);
+  min-width: var(--_height);
+  padding: 0;
+  border-radius: 50%;
+}
+.transportActive {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  box-shadow:
+    var(--shadow-inset-control),
+    0 0 0 1px var(--color-accent-dim),
+    0 0 18px -4px rgb(173 200 254 / 0.6);
+}
+
+/* ── busy ────────────────────────────────────────────────────────────────────────────────── */
+.busy {
+  cursor: progress;
+}
+.busy > :not(.spinner) {
+  opacity: 0.45;
+}

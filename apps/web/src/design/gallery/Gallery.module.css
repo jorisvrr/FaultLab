@@ -1,0 +1,242 @@
+/* Development-only component gallery. Not part of the application. */
+
+.page {
+  min-height: 100dvh;
+  padding: 0 0 var(--space-7);
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-margin);
+  background: rgb(3 4 5 / 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.barTitle {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  font-weight: 400;
+  color: var(--color-text);
+}
+
+.barNote {
+  font-family: var(--font-sans);
+  font-size: var(--type-micro-size);
+  color: var(--color-state-fault);
+}
+
+.frame {
+  margin: 0 auto;
+  transition: width var(--motion-slow) var(--motion-ease);
+}
+
+.section {
+  padding: var(--space-6) var(--space-margin) 0;
+  scroll-margin-top: 80px;
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-title-size);
+  font-weight: 400;
+  color: var(--color-text);
+}
+
+.sectionNote {
+  margin: 0 0 var(--space-4);
+  max-width: 76ch;
+  font-size: var(--type-body-size);
+  color: var(--color-text-subtle);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* ── token swatches ──────────────────────────────────────────────────────────────────────── */
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--space-2);
+}
+
+.swatch {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+}
+
+.chipColour {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+.swatchName {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.swatchRole {
+  font-size: var(--type-micro-size);
+  color: var(--color-text-subtle);
+}
+
+.tokenList {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+}
+.tokenList dt {
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.tokenList dd {
+  margin: 0;
+  color: var(--color-text-subtle);
+}
+.tokenValue {
+  color: var(--color-text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* Below the tablet breakpoint the three-column token list stacks, so long values can wrap. */
+@media (max-width: 700px) {
+  .tokenList {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 0;
+  }
+  .tokenList dt {
+    margin-top: var(--space-2);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .tokenValue {
+    text-align: left;
+  }
+}
+
+/* ── specimen rows ───────────────────────────────────────────────────────────────────────── */
+.specimen {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.specimenName {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--color-text-subtle);
+}
+
+/* ── labelled example ────────────────────────────────────────────────────────────────────── */
+.example {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 0.012);
+  align-content: start;
+}
+.exampleLabel {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+/* A patch of live stage, to show the matte-vs-glass rule in its real context. */
+.stagePatch {
+  position: relative;
+  min-height: 230px;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-surface-stage);
+}
+.stageOverlayPanel {
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
+.measure {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+  .specimen {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}
+
+/* A patterned strip behind a panel, so the blur in the glass variant is actually visible. */
+.behind {
+  height: 150px;
+  border-radius: var(--radius-card);
+  background:
+    repeating-linear-gradient(135deg, rgb(173 200 254 / 0.5) 0 3px, transparent 3px 16px),
+    repeating-linear-gradient(45deg, rgb(248 199 129 / 0.35) 0 3px, transparent 3px 22px),
+    radial-gradient(80% 60% at 30% 20%, rgb(255 255 255 / 0.18), transparent 70%);
+}
+
+/* The reconstructions are rendered at the reference's own pixel widths, so they need columns
+   wide enough to hold them without spilling into a neighbour. */
+.reconGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+  gap: var(--space-4);
+}
+/*
+ * The reconstructions are deliberately rendered at the reference's own pixel widths, so on a
+ * narrow screen they scroll inside their example box rather than widening the page. They are
+ * a fidelity exhibit, not a responsive component.
+ */
+.reconGrid .example {
+  overflow-x: auto;
+}
+@media (max-width: 520px) {
+  .reconGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
