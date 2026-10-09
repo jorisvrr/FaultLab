@@ -14,10 +14,10 @@
   },
   "scripts": {
     "dev": "npm run dev --workspace @faultlab/demo",
-    "test": "npm run test --workspace @faultlab/engine && npm run test --workspace @faultlab/trace && npm run test --workspace @faultlab/demo",
-    "test:explore": "npm run test:explore --workspace @faultlab/engine",
+    "test": "npm run test --workspace @faultlab/engine && npm run test --workspace @faultlab/trace && npm run test --workspace @faultlab/protocols && npm run test --workspace @faultlab/demo",
+    "test:explore": "npm run test:explore --workspace @faultlab/engine && npm run test:explore --workspace @faultlab/protocols",
     "coverage": "npm run coverage --workspace @faultlab/engine",
-    "typecheck": "npm run typecheck --workspace @faultlab/engine && npm run typecheck --workspace @faultlab/trace && npm run typecheck --workspace @faultlab/demo",
+    "typecheck": "npm run typecheck --workspace @faultlab/engine && npm run typecheck --workspace @faultlab/trace && npm run typecheck --workspace @faultlab/protocols && npm run typecheck --workspace @faultlab/demo",
     "build:demo": "npm run build --workspace @faultlab/demo",
     "check": "npm run typecheck && npm run test && npm run build:demo",
     "test:e2e": "npm run test:e2e --workspace @faultlab/demo"

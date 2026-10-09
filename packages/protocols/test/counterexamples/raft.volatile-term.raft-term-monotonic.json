@@ -1,0 +1,64 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:volatile-term: currentTerm is lost on a crash and restarts at 0 (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:volatile-term",
+    "version": "1",
+    "variant": "volatile-term",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-term-monotonic",
+    "version": "1"
+  },
+  "config": {
+    "seed": 4259442735,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 25
+    },
+    "maxTime": 2500,
+    "faults": [
+      {
+        "at": 211,
+        "type": "crash",
+        "node": "n2"
+      },
+      {
+        "at": 211,
+        "type": "recover",
+        "node": "n2"
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 4,
+    "originalFaultCount": 2,
+    "shrinkSteps": 9,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 2
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 211,
+    "nodes": [
+      "n2"
+    ],
+    "observed": "currentTerm went from 1 to 0 (incarnation 2)",
+    "eventNumber": 7,
+    "fingerprint": "63a86602"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "b725bff9"
+  }
+}

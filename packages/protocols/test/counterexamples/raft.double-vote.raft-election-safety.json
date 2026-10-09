@@ -1,0 +1,53 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:double-vote: double votes let two candidates both reach a majority in one term (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:double-vote",
+    "version": "1",
+    "variant": "double-vote",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-election-safety",
+    "version": "1"
+  },
+  "config": {
+    "seed": 2911200105,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 25
+    },
+    "maxTime": 2500,
+    "faults": []
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 4,
+    "originalFaultCount": 0,
+    "shrinkSteps": 7,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 0
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 206,
+    "nodes": [
+      "n2",
+      "n3"
+    ],
+    "observed": "Term 1 was led by n2 and also by n3",
+    "eventNumber": 11,
+    "fingerprint": "02478510"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "6b403d9e"
+  }
+}

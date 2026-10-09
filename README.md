@@ -4,7 +4,7 @@
 
 FaultLab runs networks of virtual computers executing distributed protocols under controlled latency, crashes, message loss and partitions. Every run is reproducible from its seed. Every message, timer and state change is recorded in an append-only, causally linked trace that you can inspect, replay and share.
 
-> **Status: CP3, snapshots, replay and time travel.** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, plus online safety invariants with explainable violations and automatic search for minimal failing fault plans. There is no UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
+> **Status: CP4, Raft leader election (awaiting review).** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, online safety invariants with explainable violations, automatic search for minimal failing fault plans, snapshots and time travel, and bounded liveness checks. `@faultlab/protocols` implements Raft's leader election (not log replication, which is CP8). There is no final UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -21,7 +21,7 @@ const result = runSimulation({
 
 result.reason;                    // 'quiescent'
 result.eventsProcessed;           // 45
-fingerprintTrace(result.trace);   // '09f7b23f', identical on every run and machine
+fingerprintTrace(result.trace);   // '7fda34b3' (engine 0.4.0-cp4), identical on every run and machine
 ```
 
 Faults are part of the experiment's input:
@@ -42,6 +42,23 @@ runSimulation({
     { at: 220, type: 'recover', node: 'n2' },   // incarnation 2; storage survived, state did not
     { at: 300, type: 'heal' },
   ],
+});
+```
+
+Raft leader election (CP4), with its safety invariants and a bounded liveness check:
+
+```ts
+import { createRaftElection, raftInvariants, raftLeaderLiveness } from '@faultlab/protocols';
+
+runSimulation({
+  seed: 1,
+  nodes: ['n1', 'n2', 'n3', 'n4', 'n5'],
+  protocol: createRaftElection(),               // timeouts 150–300, heartbeat 50
+  network: { latency: { min: 1, max: 10 } },
+  limits: { maxTime: 2000 },
+  faults: [{ at: 400, type: 'partition', groups: [['n5'], ['n1', 'n2', 'n3', 'n4']] }, { at: 900, type: 'heal' }],
+  invariants: raftInvariants,                    // Election Safety and four more, from real events
+  liveness: [raftLeaderLiveness({ deadline: 1500 })], // a test bound under stated assumptions
 });
 ```
 
@@ -78,9 +95,11 @@ const result = runSimulation({
 - **Invariants** (state and historical) evaluated after every step over deeply frozen views; stop-on-first or record-and-continue; explainable violation records that separate facts from claims
 - **Fault exploration**: fast-check generates fault plans, shrinks failures to 1-minimal counterexamples, and stores them as replayable fixtures
 - In-flight message index, property-tested against the scheduler and the trace
+- **Bounded liveness** (CP4): conditional checks with recorded assumptions and real deadline events, reported separately from safety
+- **`@faultlab/protocols`** (CP4): Raft leader election per Figure 2 of the paper, five historical safety invariants, six deliberately broken variants with stored counterexamples, and a reproducible naive-vs-Raft comparison
 - **Snapshots** at step boundaries (versioned JSON, validated as untrusted), **keyframe time travel** (seek in < K steps, regenerate any trace range with absolute indices, memory-bounded runs)
 - **`@faultlab/trace`**: a framework-independent TraceIndex for fast, exact inspection of any trace entry, steps, markers and causal chains
-- 313 tests: unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
+- 628 tests (engine 416, trace 18, protocols 184, demo 10) plus 6 Playwright tests: unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
 
 ## Getting started
 
@@ -106,6 +125,7 @@ npm run test:e2e   # Playwright checks against the locally installed Chrome
 ```
 packages/engine/        @faultlab/engine: zero runtime dependencies, no DOM, no Node
 packages/trace/         @faultlab/trace: read-only TraceIndex over completed traces (engine types only)
+packages/protocols/     @faultlab/protocols: Raft leader election, its invariants and liveness check (engine types only)
   src/                  scheduler, clock, PRNG, network, protocol API, trace, simulation
   src/fixtures/         example protocols (ping, echo-forever)
   test/                 Vitest + fast-check suites; test/reference/ holds the C PRNG oracle
@@ -119,6 +139,7 @@ apps/web/               (CP5) React + Vite app, simulation in a Web Worker
 | Document | What it answers |
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | How the system is layered; simulation state vs. UI state |
+| [RAFT](docs/RAFT.md) | Raft leader election rule by rule against the paper; what is and is not claimed |
 | [SEMANTICS](docs/SEMANTICS.md) | Core types, event contracts, scheduler and termination rules (the spec) |
 | [DETERMINISM](docs/DETERMINISM.md) | Why identical inputs give identical traces, and what that does not cover |
 | [FAILURE_MODES](docs/FAILURE_MODES.md) | Subtle ways simulators go wrong, and how each is handled |

@@ -38,6 +38,8 @@ export { DEFAULT_LIMITS, MAX_NODES, resolveConfig, type Limits, type ResolvedCon
 export { EventTrace, fingerprintTrace, serializeTrace, type EntryIndex, type StopReason, type TraceEntry, type TraceEntryKind } from './trace';
 export { runSimulation, Simulation, type NodeInfo, type RunResult } from './simulation';
 export { TimeTravel, type Keyframe, type RecordOptions, type SeekResult } from './time-travel';
+export { MAX_LIVENESS_CHECKS, resolveLiveness, type LivenessCheck, type LivenessCheckState, type LivenessPhase, type LivenessRef } from './liveness';
+export { LEGACY_TRACE_VERSIONS, projectTrace, type LegacyTraceVersion } from './legacy';
 export {
   SNAPSHOT_FORMAT,
   SNAPSHOT_LIMITS,

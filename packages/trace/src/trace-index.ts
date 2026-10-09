@@ -69,6 +69,16 @@ export interface DropFrame {
   readonly age: number;
 }
 
+/** Phase of a bounded-liveness check at a trace position (CP4). */
+export interface LivenessFrame {
+  readonly id: string;
+  readonly phase: 'idle' | 'waiting' | 'met' | 'missed';
+  /** When the current period's assumptions started to hold. */
+  readonly since: number | null;
+  /** The configured test bound for the current period. */
+  readonly deadlineAt: number | null;
+}
+
 export interface Frame {
   readonly index: EntryIndex;
   readonly entry: TraceEntry;
@@ -82,6 +92,8 @@ export interface Frame {
   readonly recentDrops: readonly DropFrame[];
   /** Violations recorded at or before this entry whose episode is still open. */
   readonly openViolations: readonly InvariantViolationEntry[];
+  /** Bounded-liveness phases, one per configured check (empty if none). Never safety results. */
+  readonly liveness: readonly LivenessFrame[];
   readonly stopped: boolean;
 }
 
@@ -104,6 +116,8 @@ export type MarkerKind =
   | 'violation-cleared'
   | 'invariant-error'
   | 'protocol-error'
+  | 'liveness-met'
+  | 'liveness-missed'
   | 'run-end';
 
 export interface Marker {
@@ -137,6 +151,7 @@ const TRIGGER_KINDS: ReadonlySet<TraceEntry['kind']> = new Set([
   'link.fault',
   'link.restore',
   'fault.skipped',
+  'liveness.missed', // the deadline event of a bounded-liveness check (CP4)
 ] as const);
 
 export function isStepTrigger(entry: TraceEntry): boolean {
@@ -161,6 +176,7 @@ interface Working {
   links: Map<string, { from: NodeId; to: NodeId; loss: number; delay: LatencyRange }>;
   inFlight: Map<string, MessageRecord>;
   open: Map<string, InvariantViolationEntry>;
+  liveness: Map<string, LivenessFrame>;
   stopped: boolean;
 }
 
@@ -171,6 +187,7 @@ function cloneWorking(w: Working): Working {
     links: new Map(w.links),
     inFlight: new Map(w.inFlight),
     open: new Map(w.open),
+    liveness: new Map(w.liveness),
     stopped: w.stopped,
   };
 }
@@ -233,6 +250,18 @@ function apply(w: Working, e: TraceEntry, messages: ReadonlyMap<string, MessageR
       break;
     case 'invariant.cleared':
       w.open.delete(e.invariant.id);
+      break;
+    case 'liveness.armed':
+      w.liveness.set(e.check.id, Object.freeze({ id: e.check.id, phase: 'waiting', since: e.since, deadlineAt: e.deadlineAt }));
+      break;
+    case 'liveness.met':
+    case 'liveness.missed': {
+      const previous = w.liveness.get(e.check.id);
+      w.liveness.set(e.check.id, Object.freeze({ id: e.check.id, phase: e.kind === 'liveness.met' ? 'met' : 'missed', since: e.since, deadlineAt: previous?.deadlineAt ?? null }));
+      break;
+    }
+    case 'liveness.disarmed':
+      w.liveness.set(e.check.id, Object.freeze({ id: e.check.id, phase: 'idle', since: null, deadlineAt: null }));
       break;
     case 'run.end':
       w.stopped = true;
@@ -311,6 +340,7 @@ export class TraceIndex {
       links: new Map(),
       inFlight: new Map(),
       open: new Map(),
+      liveness: new Map(start.liveness.map((c) => [c.id, Object.freeze({ id: c.id, phase: 'idle' as const, since: null, deadlineAt: null })])),
       stopped: false,
     };
     let step = 0;
@@ -428,6 +458,7 @@ export class TraceIndex {
       inFlight: Object.freeze(inFlight),
       recentDrops: Object.freeze(this.#recentDrops(cursor, time)),
       openViolations: Object.freeze([...w.open.values()]),
+      liveness: Object.freeze([...w.liveness.values()]),
       stopped: w.stopped,
     });
   }
@@ -538,6 +569,10 @@ function markerFor(e: TraceEntry): Marker | null {
       return m('invariant-error', [], `${e.invariant.id}: ${e.error}`);
     case 'protocol.error':
       return m('protocol-error', [e.node], `${e.node}: ${e.error}`);
+    case 'liveness.met':
+      return m('liveness-met', [], `${e.check.id}: progress after ${e.duration} ticks${e.late ? ' (late)' : ''}`);
+    case 'liveness.missed':
+      return m('liveness-missed', [], `${e.check.id}: no progress by t=${e.deadlineAt} (bounded check under stated assumptions)`);
     case 'run.end':
       return m('run-end', [], `run ended: ${e.reason}`);
     default:

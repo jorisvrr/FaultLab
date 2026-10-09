@@ -1,0 +1,81 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:volatile-term: a node that forgot its term adopts the old term again and votes in it a second time (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:volatile-term",
+    "version": "1",
+    "variant": "volatile-term",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-election-safety",
+    "version": "1"
+  },
+  "config": {
+    "seed": 3393420544,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 2500,
+    "faults": [
+      {
+        "at": 950,
+        "type": "recover",
+        "node": "n3"
+      },
+      {
+        "at": 900,
+        "type": "crash",
+        "node": "n1"
+      },
+      {
+        "at": 1104,
+        "type": "recover",
+        "node": "n1"
+      },
+      {
+        "at": 0,
+        "type": "link",
+        "from": "n2",
+        "to": "n3",
+        "loss": 0.2
+      },
+      {
+        "at": 0,
+        "type": "crash",
+        "node": "n3"
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 777,
+    "runsUntilFailure": 951,
+    "originalFaultCount": 6,
+    "shrinkSteps": 35,
+    "removedByMinimiser": 1,
+    "minimisedFaultCount": 5
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 1113,
+    "nodes": [
+      "n1",
+      "n3"
+    ],
+    "observed": "Term 1 was led by n1 and also by n3",
+    "eventNumber": 73,
+    "fingerprint": "1f70322d"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "80f22992"
+  }
+}

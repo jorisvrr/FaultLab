@@ -1,0 +1,505 @@
+{
+  "A naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 1,
+    "firstLeaderAt": 64,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 64,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 1,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          64
+        ]
+      }
+    },
+    "fingerprint": "ef24fa95"
+  },
+  "A raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 1,
+    "firstLeaderAt": 202,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 202,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 1,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          202
+        ]
+      },
+      "raft-leader-elected": {
+        "armed": 1,
+        "met": 1,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          212
+        ]
+      }
+    },
+    "fingerprint": "26a0163e"
+  },
+  "B naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 64,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 450,
+    "longestLeaderlessStretch": 64,
+    "majoritySideAvailability": 0.88,
+    "recoveryAfterHeal": 10,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 3,
+        "met": 3,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          64,
+          60,
+          10
+        ]
+      }
+    },
+    "fingerprint": "f783f023"
+  },
+  "B raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 2,
+    "firstLeaderAt": 202,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 373,
+    "longestLeaderlessStretch": 202,
+    "majoritySideAvailability": 0.728,
+    "recoveryAfterHeal": 9,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 3,
+        "met": 3,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          202,
+          136,
+          9
+        ]
+      },
+      "raft-leader-elected": {
+        "armed": 3,
+        "met": 3,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          212,
+          138,
+          44
+        ]
+      }
+    },
+    "fingerprint": "69db321e"
+  },
+  "B2 naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 68,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 455,
+    "longestLeaderlessStretch": 68,
+    "majoritySideAvailability": 0.86,
+    "recoveryAfterHeal": 25,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 3,
+        "met": 3,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          68,
+          70,
+          25
+        ]
+      }
+    },
+    "fingerprint": "cd763a8c"
+  },
+  "B2 raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 2,
+    "firstLeaderAt": 205,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 205,
+    "majoritySideAvailability": 1,
+    "recoveryAfterHeal": 68,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          205,
+          57
+        ]
+      },
+      "raft-leader-elected": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          214,
+          72
+        ]
+      }
+    },
+    "fingerprint": "af81cccd"
+  },
+  "C naive": {
+    "electionSafetyViolations": 1,
+    "electionSafetyFirst": "Epoch 2 was led by n3 and later also by n2",
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 3,
+    "firstLeaderAt": 68,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 763,
+    "longestLeaderlessStretch": 68,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 1,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": [
+          68
+        ]
+      }
+    },
+    "fingerprint": "4152dfcc"
+  },
+  "C raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 0,
+    "firstLeaderAt": null,
+    "maxConcurrentLeaderBeliefs": 0,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 1000,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      },
+      "raft-leader-elected": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "c7e9ab31"
+  },
+  "D naive": {
+    "electionSafetyViolations": 1,
+    "electionSafetyFirst": "Epoch 1 was led by n3 and later also by n1",
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 69,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 70,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "1921346f"
+  },
+  "D raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 0,
+    "firstLeaderAt": null,
+    "maxConcurrentLeaderBeliefs": 0,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 1000,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      },
+      "raft-leader-elected": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "8f8c4f2e"
+  },
+  "E5 naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 64,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 752,
+    "longestLeaderlessStretch": 64,
+    "majoritySideAvailability": 1,
+    "recoveryAfterHeal": 12,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          64,
+          12
+        ]
+      }
+    },
+    "fingerprint": "936d30c5"
+  },
+  "E5 raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 2,
+    "firstLeaderAt": 202,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 202,
+    "majoritySideAvailability": 1,
+    "recoveryAfterHeal": 10,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          202,
+          5
+        ]
+      },
+      "raft-leader-elected": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 0,
+        "metDurations": [
+          212,
+          17
+        ]
+      }
+    },
+    "fingerprint": "aceaf8d4"
+  },
+  "E4 naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 69,
+    "maxConcurrentLeaderBeliefs": 2,
+    "ticksWithSeveralLeaderBeliefs": 754,
+    "longestLeaderlessStretch": 69,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": 14,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": [
+          69,
+          14
+        ]
+      }
+    },
+    "fingerprint": "78ae4dd8"
+  },
+  "E4 raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 2,
+    "firstLeaderAt": 224,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 224,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": 27,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 3,
+        "met": 3,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": [
+          224,
+          0,
+          4
+        ]
+      },
+      "raft-leader-elected": {
+        "armed": 2,
+        "met": 2,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": [
+          233,
+          37
+        ]
+      }
+    },
+    "fingerprint": "61694cb4"
+  },
+  "F naive": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": null,
+    "quorumViolations": null,
+    "leaderships": 2,
+    "firstLeaderAt": 65,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 65,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "5dea7856"
+  },
+  "F raft": {
+    "electionSafetyViolations": 0,
+    "electionSafetyFirst": null,
+    "votingViolations": 0,
+    "quorumViolations": 0,
+    "leaderships": 2,
+    "firstLeaderAt": 211,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 365,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      },
+      "raft-leader-elected": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "d63977c1"
+  },
+  "F raft/bug:volatile-voted-for": {
+    "electionSafetyViolations": 1,
+    "electionSafetyFirst": "Term 1 was led by n1 and also by n3",
+    "votingViolations": 1,
+    "quorumViolations": 3,
+    "leaderships": 3,
+    "firstLeaderAt": 211,
+    "maxConcurrentLeaderBeliefs": 1,
+    "ticksWithSeveralLeaderBeliefs": 0,
+    "longestLeaderlessStretch": 249,
+    "majoritySideAvailability": null,
+    "recoveryAfterHeal": null,
+    "liveness": {
+      "one-leader-believed": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      },
+      "raft-leader-elected": {
+        "armed": 1,
+        "met": 0,
+        "missed": 0,
+        "disarmed": 1,
+        "metDurations": []
+      }
+    },
+    "fingerprint": "fb4d7a67"
+  }
+}

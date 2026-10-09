@@ -3,6 +3,7 @@ import { fnv1a32, toHex32 } from './hash';
 import { canonicalJson, type JsonValue } from './json';
 import type { DropReason, LatencyRange } from './network';
 import type { InvariantPolicy, InvariantRef } from './invariants';
+import type { LivenessPhase, LivenessRef } from './liveness';
 import type { NodeStatus } from './node';
 import type { MessageId, NodeId, TimerId } from './protocol';
 import type { Duration, VirtualTime } from './time';
@@ -23,7 +24,9 @@ export type StopReason =
   /** An invariant checker threw or returned a malformed verdict. */
   | 'invariant-error'
   /** `limits.maxViolations` violations were recorded under `record-and-continue`. */
-  | 'violation-limit';
+  | 'violation-limit'
+  /** A liveness check threw or returned a non-boolean. */
+  | 'liveness-error';
 
 interface EntryBase {
   /** Position in the trace. Entries are append-only, so this never changes. */
@@ -63,6 +66,8 @@ export interface RunStartEntry extends EntryBase {
   /** Invariants checked after every step, in evaluation order (ADR-0012). */
   readonly invariants: readonly InvariantRef[];
   readonly invariantPolicy: InvariantPolicy;
+  /** Bounded liveness checks with their deadlines and assumptions (CP4). */
+  readonly liveness: readonly LivenessRef[];
 }
 
 export interface NodeStartEntry extends NodeEntryBase {
@@ -237,6 +242,57 @@ export interface InvariantErrorEntry extends EntryBase {
   readonly error: string;
 }
 
+/** Identity of a liveness check in liveness entries (deadline and assumptions are in run.start). */
+export interface LivenessCheckRef {
+  readonly id: string;
+  readonly version: string;
+  readonly name: string;
+}
+
+/** The check's assumptions started to hold: progress is now expected by `deadlineAt`. */
+export interface LivenessArmedEntry extends EntryBase {
+  readonly kind: 'liveness.armed';
+  readonly check: LivenessCheckRef;
+  readonly since: VirtualTime;
+  readonly deadlineAt: VirtualTime;
+}
+
+/** Progress was observed while the assumptions held. `late` if after the deadline. */
+export interface LivenessMetEntry extends EntryBase {
+  readonly kind: 'liveness.met';
+  readonly check: LivenessCheckRef;
+  readonly since: VirtualTime;
+  readonly duration: Duration;
+  readonly late: boolean;
+}
+
+/**
+ * The deadline passed without progress while the assumptions held. A real scheduled event at
+ * exactly `deadlineAt`; this entry is the TRIGGER of that step. `cause` is the armed entry.
+ * This is a bounded-liveness result under stated assumptions, never a safety violation.
+ */
+export interface LivenessMissedEntry extends EntryBase {
+  readonly kind: 'liveness.missed';
+  readonly check: LivenessCheckRef;
+  readonly since: VirtualTime;
+  readonly deadlineAt: VirtualTime;
+  readonly assumptions: readonly string[];
+}
+
+/** The assumptions stopped holding; the period ends (no expectation while they do not hold). */
+export interface LivenessDisarmedEntry extends EntryBase {
+  readonly kind: 'liveness.disarmed';
+  readonly check: LivenessCheckRef;
+  readonly since: VirtualTime;
+  readonly previous: LivenessPhase;
+}
+
+export interface LivenessErrorEntry extends EntryBase {
+  readonly kind: 'liveness.error';
+  readonly check: LivenessCheckRef;
+  readonly error: string;
+}
+
 export interface RunEndEntry extends EntryBase {
   readonly kind: 'run.end';
   readonly reason: StopReason;
@@ -266,6 +322,11 @@ export type TraceEntry =
   | InvariantViolationEntry
   | InvariantClearedEntry
   | InvariantErrorEntry
+  | LivenessArmedEntry
+  | LivenessMetEntry
+  | LivenessMissedEntry
+  | LivenessDisarmedEntry
+  | LivenessErrorEntry
   | RunEndEntry;
 
 export type TraceEntryKind = TraceEntry['kind'];

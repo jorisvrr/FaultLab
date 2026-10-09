@@ -105,7 +105,7 @@ describe('experiments', () => {
       expect(e.problem).toBeUndefined();
       const result = runSimulation(e.build());
       const violation = buildModel(result.trace).violations[0]!;
-      expect({ time: violation.time, nodes: violation.nodes, eventNumber: violation.eventNumber, fingerprint: fingerprintTrace(result.trace) }).toEqual({
+      expect({ time: violation.time, nodes: violation.nodes, eventNumber: violation.eventNumber, fingerprint: e.fingerprintOf!(result.trace) }).toEqual({
         time: e.expected!.violationTime,
         nodes: e.expected!.nodes,
         eventNumber: e.expected!.eventNumber,

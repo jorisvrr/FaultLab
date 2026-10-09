@@ -18,6 +18,10 @@ Rule: a dependency must solve a problem we actually have, better than ~100 lines
 
 No runtime dependencies. It imports only TypeScript **types** from `@faultlab/engine` (declared as a dev dependency); an architecture test enforces this.
 
+## `@faultlab/protocols` (CP4)
+
+No runtime dependencies. It imports only TypeScript **types** from `@faultlab/engine`; an architecture test enforces this and forbids `Math.random`, `Date`, `performance`, timers and `process` in its source. Its tests use the root `fast-check` and `vitest`, plus `@faultlab/engine` (runtime, tests only) and `@faultlab/trace` (TraceIndex cross-checks). No new third-party package was added in CP4. `immer` was reconsidered for Raft's state updates and again not adopted: Raft's state is small, and plain spreads keep the copy semantics visible.
+
 ## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
 
 | Package | Version | License | Why |
@@ -43,7 +47,7 @@ No runtime dependencies. It imports only TypeScript **types** from `@faultlab/en
 | Package | Why not |
 |---|---|
 | `seedrandom` and other PRNG libraries | Our generator is ~40 lines, verified bit-exact against the C reference, and exposes its state for snapshots, which most libraries do not. |
-| `immer` | Would make protocol state updates terser, but hides the copy/freeze semantics we want students and reviewers to see. Reconsider for Raft ergonomics in CP4. |
+| `immer` | Would make protocol state updates terser, but hides the copy/freeze semantics we want students and reviewers to see. Reconsidered in CP4 for Raft and not needed. |
 | `lodash`, `ramda` | Nothing needed. |
 | Any backend, auth, database | Out of scope by design: the first milestones run entirely in the browser. |
 | Rust/WASM toolchain | Not justified until profiling says so (CP9) or sandboxing requires it (CP10). |

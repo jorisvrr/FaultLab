@@ -53,3 +53,29 @@ The final timeline must eventually support:
 - **Reconstruction cost.** Rebuilding state by scanning from entry #0 for every frame does not scale beyond small traces. CP3 provides indexed reconstruction.
 - **Log volume.** 1 168 entries for 421 events in a small run: the log needs grouping per step and filtering by node and kind.
 - **Execute vs. replay.** The prototype shows that separating "the engine computed this" from "you are watching a recording" is both possible and important. Keep it explicit.
+
+## Raft visualisation data (CP4 → CP5/CP6)
+
+CP4 implements no UI, and covers Raft **leader election only**: there is no log, no commitment and no replicated state machine to visualise until CP8. These are the **data** requirements a future leader-election view must be built on. Every item is derivable from a real trace (engine output) with the `TraceIndex`; no protocol event may exist only in the UI, and every visual element must keep a link to the trace entry it comes from (`index`, plus `cause` / `conditionIndex` for explanations).
+
+| What to show | Source in the trace (exact) | Causal reference to keep |
+|---|---|---|
+| **Node role** (follower / candidate / leader) | `state.update.state.role` of the node; `frameAt(i).nodes[k].state` | the `state.update` entry (`stateEntry`) |
+| **Current term** per node | `state.update.state.currentTerm`; durable value in `storage.write.set.currentTerm` / frame `storage` | the `storage.write` that made it durable |
+| **Election attempt** (term T started by n) | `state.update` with `role: 'candidate'`, `currentTerm: T`, triggered by an election `timer.fire` | `cause` → the `timer.fire` → its `timer.set` |
+| **Vote request** | `message.send` with `payload.type: 'RequestVote'` (`term`, `candidateId`); its `message.deliver` or `message.drop` | send ↔ deliver/drop via `messageId`; drops via `conditionIndex` to the fault |
+| **Vote granted / rejected** | `message.send` of `RequestVoteResponse` with `voteGranted` true/false and `term`; for a grant, the voter's `storage.write votedFor` in the same step | `cause` → the `RequestVote` delivery |
+| **Majority formation** | the candidate's delivered granted responses for its term (distinct senders) + its durable self-vote; majority = ⌊n/2⌋+1 of the configured nodes (`run.start.nodes`) | each counted `message.deliver`; never the protocol's `votesGranted` alone |
+| **Leader transition** | `state.update` with `role: 'leader'` (first one per node and term); step-down = `state.update` from leader to follower with a higher term | `cause` → the deciding vote delivery, or the higher-term message |
+| **Heartbeats** | `message.send` / `message.deliver` of `AppendEntries` with `entries: []`; follower timer resets as `timer.cancel` + `timer.set` | `cause` → the leader's heartbeat `timer.fire` |
+| **Stale leader** (believes it leads an older term) | a running node in `role: 'leader'` whose `currentTerm` is lower than another leader's term | both `state.update` entries; must NOT be drawn as an Election Safety violation |
+| **Partitions / link faults** | `network.partition`, `network.heal`, `link.fault`, `link.restore`; frame `partition`, `links` | the fault entry (`faultId`), drops' `conditionIndex` |
+| **Safety violations** | `invariant.violation` (ids `raft-election-safety`, `raft-term-monotonic`, `raft-one-vote-per-term`, `raft-leader-has-quorum`, `raft-term-adoption`) with `expected`, `observed`, `evidence`, `references`, `step`, `activeFaults` | `references` (e.g. both leaders' entries), `trigger` |
+| **Conditional liveness results** | `liveness.armed` / `.met` / `.missed` / `.disarmed` with `check`, `since`, `deadlineAt`, `duration`, `late`; frame `liveness[]` phases; assumptions in `run.start.liveness` | `liveness.missed.cause` → its `liveness.armed`; must be visually distinct from safety violations and must show the assumptions and that D is a test bound |
+
+Presentation rules that follow from CP4's semantics:
+
+1. **Election Safety is per term over the whole history**, not "one leader on screen". Two leader badges in *different* terms at the same moment is legal and should be explained (stale leader), not flagged red.
+2. **Liveness ≠ safety.** A missed deadline is a bounded-test result under stated assumptions; a disarmed check means "no expectation" (e.g. no majority), which must not look like success or failure.
+3. **Term lanes**: a per-term view (who campaigned, who voted for whom, who won, how long without a leader) is derivable from the entries above; it needs no extra engine data.
+4. Vote arrows and majority counters must be built from **delivered** responses, matching `raft-leader-has-quorum`, so the UI and the invariant never disagree.

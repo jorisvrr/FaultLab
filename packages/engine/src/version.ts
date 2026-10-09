@@ -6,4 +6,4 @@
  * could alter any trace produced from identical inputs (ordering rules, PRNG algorithm,
  * latency sampling, trace format, ...). The golden-trace test exists to catch forgotten bumps.
  */
-export const ENGINE_VERSION = '0.3.0-cp2';
+export const ENGINE_VERSION = '0.4.0-cp4';

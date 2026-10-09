@@ -7,6 +7,7 @@ export {
   type DropFrame,
   type Frame,
   type InFlightFrame,
+  type LivenessFrame,
   type InvariantViolationEntry,
   type Marker,
   type MarkerKind,

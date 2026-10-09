@@ -106,6 +106,10 @@ describe('determinism', () => {
     expect(fingerprintTrace(projectTrace(runSimulation(reference()).trace, '0.1.0-cp0') as never)).toBe('62159051');
   });
 
+  it('reproduces the CP2/CP3 golden fingerprint when projected onto the 0.3.0-cp2 trace format (liveness disabled)', () => {
+    expect(fingerprintTrace(projectTrace(runSimulation(reference()).trace, '0.3.0-cp2') as never)).toBe('09f7b23f');
+  });
+
   it('reproduces the CP1 golden fingerprint when projected onto the CP1 trace format (invariants disabled)', () => {
     expect(fingerprintTrace(projectTrace(runSimulation(reference()).trace, '0.2.0-cp1') as never)).toBe('d13876e0');
   });
@@ -118,10 +122,10 @@ describe('determinism', () => {
   it('matches the golden fingerprint for the reference experiment', () => {
     const { trace, eventsProcessed, finalTime } = runSimulation(reference());
     expect({ engine: ENGINE_VERSION, eventsProcessed, finalTime, fingerprint: fingerprintTrace(trace) }).toEqual({
-      engine: '0.3.0-cp2',
+      engine: '0.4.0-cp4',
       eventsProcessed: 45,
       finalTime: 150,
-      fingerprint: '09f7b23f',
+      fingerprint: '7fda34b3',
     });
   });
 });

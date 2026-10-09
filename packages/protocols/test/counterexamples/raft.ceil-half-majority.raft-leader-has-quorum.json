@@ -1,0 +1,54 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:ceil-half-majority: ⌈n/2⌉ is not a majority for even n: 2 of 4 votes elect a leader (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:ceil-half-majority",
+    "version": "1",
+    "variant": "ceil-half-majority",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-leader-has-quorum",
+    "version": "1"
+  },
+  "config": {
+    "seed": 0,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 2500,
+    "faults": []
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 4,
+    "originalFaultCount": 0,
+    "shrinkSteps": 2,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 0
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 206,
+    "nodes": [
+      "n4",
+      "n2"
+    ],
+    "observed": "2 vote(s) evidenced (n4, n2); 3 required",
+    "eventNumber": 7,
+    "fingerprint": "44751c0e"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "4ae6faa7"
+  }
+}

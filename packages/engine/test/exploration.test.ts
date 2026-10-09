@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -94,7 +94,61 @@ describe.each([
         fingerprint,
       },
     };
-    mkdirSync(OUT, { recursive: true });
-    writeFileSync(join(OUT, `naive-leader.${invariantId}.json`), `${JSON.stringify(fixture, null, 2)}\n`);
+    writeNewFixture(`naive-leader.${invariantId}.json`, fixture);
+  });
+});
+
+/**
+ * Fixtures are written only if they do not exist yet: a stored counterexample is never silently
+ * overwritten (e.g. after an engine version bump). To replace one on purpose, delete it first
+ * and explain why in the engineering log.
+ */
+function writeNewFixture(name: string, fixture: CounterexampleFixture): void {
+  const path = join(OUT, name);
+  if (existsSync(path)) return;
+  mkdirSync(OUT, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(fixture, null, 2)}\n`);
+}
+
+/**
+ * CP4 regression fixture for the CP2 finding "crashes alone can still reuse an epoch". In CP2 it
+ * existed only as an inline test (naive-leader.test.ts); here the same weakness is rediscovered
+ * by exploring CRASH/RECOVER-ONLY plans, so the stored discovery data is real.
+ */
+describe('exploring crash/recover-only plans against unique-leader-per-epoch', () => {
+  const crashOnly: fc.Arbitrary<FaultSpec[]> = (() => {
+    const at = fc.integer({ min: 0, max: 700 });
+    const node = fc.constantFrom(...NODES);
+    return fc.array(fc.oneof(fc.record({ at, type: fc.constant('crash' as const), node }), fc.record({ at, type: fc.constant('recover' as const), node })), { maxLength: 12 });
+  })();
+  const base = { ...fixtureBase('unique-leader-per-epoch'), config: { ...fixtureBase('unique-leader-per-epoch').config, seed: 0 } };
+  const build = (faults: FaultSpec[]) => configFor(base, faults);
+  const found = explore({ build, faults: crashOnly, invariantId: 'unique-leader-per-epoch', numRuns: 2000, seed: 424242 });
+
+  it('finds an epoch reused without any network fault, minimised to a 1-minimal plan', () => {
+    expect(found).not.toBeNull();
+    expect(found!.faults.every((f) => f.type === 'crash' || f.type === 'recover')).toBe(true);
+    expect(isOneMinimal(build, found!.faults, 'unique-leader-per-epoch')).toBe(true);
+    expect(found!.violation.observed).toMatch(/^Epoch \d+ was led by n\d and later also by n\d$/);
+  });
+
+  it.runIf(UPDATE)('writes the counterexample fixture (only if missing)', () => {
+    const { faults, violation, fingerprint, discovery } = found!;
+    writeNewFixture('naive-leader.crash-only.unique-leader-per-epoch.json', {
+      format: 'faultlab-counterexample/1',
+      description: 'naive-leader: crashes alone reuse an epoch, no network fault (CP2 finding; stored as a fixture in CP4 after crash/recover-only exploration)',
+      engineVersion: ENGINE_VERSION,
+      ...base,
+      config: { ...base.config, faults },
+      discovery: { ...discovery, minimisedFaultCount: faults.length },
+      expected: {
+        reason: 'invariant-violation',
+        violationTime: violation.time,
+        nodes: [...violation.nodes],
+        observed: violation.observed,
+        eventNumber: violation.eventNumber,
+        fingerprint,
+      },
+    });
   });
 });

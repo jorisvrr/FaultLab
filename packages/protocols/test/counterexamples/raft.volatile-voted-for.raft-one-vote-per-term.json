@@ -1,0 +1,69 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:volatile-voted-for: votedFor is lost on a crash, so the node can vote again in the same term (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:volatile-voted-for",
+    "version": "1",
+    "variant": "volatile-voted-for",
+    "options": {
+      "electionTimeout": {
+        "min": 150,
+        "max": 155
+      }
+    }
+  },
+  "invariant": {
+    "id": "raft-one-vote-per-term",
+    "version": "1"
+  },
+  "config": {
+    "seed": 13,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 2500,
+    "faults": [
+      {
+        "at": 151,
+        "type": "crash",
+        "node": "n1"
+      },
+      {
+        "at": 151,
+        "type": "recover",
+        "node": "n1"
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 231,
+    "originalFaultCount": 2,
+    "shrinkSteps": 4,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 2
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 158,
+    "nodes": [
+      "n1",
+      "n2"
+    ],
+    "observed": "n1 voted for n1 and then for n2 in term 1",
+    "eventNumber": 10,
+    "fingerprint": "44ad6268"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "ffbb1d8a"
+  }
+}

@@ -4,6 +4,7 @@ import { createNodeContext, type Effect, type StorageWrites } from './context';
 import { EngineInvariantError } from './errors';
 import type { Fault } from './faults';
 import { InvariantMonitor, type InFlightMessage, type NodeView, type SimulationView, type StepInfo } from './invariants';
+import type { LivenessPhase } from './liveness';
 import { toFrozenJson, type JsonValue } from './json';
 import { VirtualNetwork, type DropReason } from './network';
 import { NodeRuntime, type NodeStatus } from './node';
@@ -26,7 +27,17 @@ type SimEvent =
       readonly incarnation: number;
       readonly cause: number;
     }
-  | { readonly kind: 'fault'; readonly fault: Fault; readonly cause: number };
+  | { readonly kind: 'fault'; readonly fault: Fault; readonly cause: number }
+  /** Deadline of a bounded liveness check (CP4). `cause` is its `liveness.armed` entry. */
+  | { readonly kind: 'liveness.deadline'; readonly check: number; readonly cause: number };
+
+/** Mutable per-check liveness state (snapshotted). */
+interface LivenessState {
+  phase: LivenessPhase;
+  since: VirtualTime | null;
+  armedEntry: EntryIndex | null;
+  deadlineSeq: number | null;
+}
 
 interface Envelope {
   readonly id: MessageId;
@@ -77,14 +88,16 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
    */
   readonly #inFlight = new Map<MessageId, InFlightMessage>();
   readonly #monitor: InvariantMonitor | null;
+  readonly #liveness: LivenessState[];
   #eventsProcessed = 0;
   #stopReason: StopReason | null = null;
 
   constructor(config: SimulationConfig<S, M>) {
     this.config = resolveConfig(config);
-    const { seed, nodes, protocol, network, limits, faults, invariants, invariantPolicy } = this.config;
+    const { seed, nodes, protocol, network, limits, faults, invariants, invariantPolicy, liveness } = this.config;
     this.#network = new VirtualNetwork(network, deriveStream(seed, 'network'));
     this.#monitor = invariants.length === 0 ? null : new InvariantMonitor(invariants, invariantPolicy);
+    this.#liveness = liveness.map(() => ({ phase: 'idle', since: null, armedEntry: null, deadlineSeq: null }));
 
     const runStart: EntryIndex = this.#trace.append({
       kind: 'run.start',
@@ -100,6 +113,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       faults,
       invariants: invariants.map((invariant) => invariant.ref),
       invariantPolicy,
+      liveness: liveness.map((check) => check.ref),
     });
 
     this.#inputs = this.#trace.at(runStart) as RunStartEntry;
@@ -228,12 +242,18 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       this.#stop('protocol-error');
       return true;
     }
-    if (this.#monitor !== null) {
-      const reason = this.#checkInvariants(this.#monitor, stepStart);
-      if (reason !== null) {
-        this.#stop(reason);
-        return true;
-      }
+    // One lazily built, frozen view per step, shared by invariants and liveness checks.
+    let view: SimulationView | undefined;
+    const getView = (): SimulationView => (view ??= this.#view());
+    let reason: StopReason | null = null;
+    if (this.#monitor !== null) reason = this.#checkInvariants(this.#monitor, stepStart, getView);
+    if (this.#liveness.length > 0) {
+      const livenessReason = this.#checkLiveness(stepStart, getView);
+      reason ??= livenessReason;
+    }
+    if (reason !== null) {
+      this.#stop(reason);
+      return true;
     }
     if (this.#scheduler.pendingCount > limits.maxPendingEvents) this.#stop('pending-limit');
     return true;
@@ -243,12 +263,12 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
    * Evaluate every invariant after a committed step and record the outcomes in configuration
    * order (ADR-0013). Returns the stop reason, if the outcomes require stopping.
    */
-  #checkInvariants(monitor: InvariantMonitor, stepStart: number): StopReason | null {
+  #checkInvariants(monitor: InvariantMonitor, stepStart: number, getView: () => SimulationView): StopReason | null {
     const trigger = this.#trace.at(stepStart);
     if (trigger === undefined) throw new EngineInvariantError('a committed step appended no trace entry');
     const step: StepInfo = Object.freeze({ trigger, entries: this.#trace.slice(stepStart) });
     const stepLast = this.#trace.length - 1;
-    const outcomes = monitor.evaluate(this.#view(), step, (id) => typeof id === 'string' && this.#nodes.has(id), this.#trace.length);
+    const outcomes = monitor.evaluate(getView(), step, (id) => typeof id === 'string' && this.#nodes.has(id), this.#trace.length);
 
     let error = false;
     let violation = false;
@@ -298,6 +318,52 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     if (error) return 'invariant-error';
     if (violation && this.config.invariantPolicy === 'stop-on-first') return 'invariant-violation';
     if (monitor.violations >= this.config.limits.maxViolations) return 'violation-limit';
+    return null;
+  }
+
+  /**
+   * Evaluate bounded liveness checks after a committed step (ADR-0019), in configuration order,
+   * after the invariants. Liveness results never stop a run; only a failing check does.
+   */
+  #checkLiveness(stepStart: EntryIndex, getView: () => SimulationView): StopReason | null {
+    const time = this.#scheduler.now;
+    for (const [i, check] of this.config.liveness.entries()) {
+      const state = this.#liveness[i]!;
+      const ref = { id: check.ref.id, version: check.ref.version, name: check.ref.name };
+      let assumptions: unknown;
+      let progress: unknown;
+      try {
+        assumptions = check.assumptionsHold(getView());
+        progress = check.progress(getView());
+        if (typeof assumptions !== 'boolean' || typeof progress !== 'boolean') throw new TypeError('liveness checks must return booleans');
+      } catch (error) {
+        this.#trace.append({ kind: 'liveness.error', time, cause: stepStart, check: ref, error: describeError(error) });
+        return 'liveness-error';
+      }
+      const since = state.since;
+      if (!assumptions) {
+        if (state.phase !== 'idle') {
+          if (state.deadlineSeq !== null) this.#scheduler.cancel(state.deadlineSeq);
+          this.#trace.append({ kind: 'liveness.disarmed', time, cause: stepStart, check: ref, since: since as number, previous: state.phase });
+          Object.assign(state, { phase: 'idle', since: null, armedEntry: null, deadlineSeq: null });
+        }
+        continue;
+      }
+      // A new waiting period starts when the assumptions begin to hold, or when progress is lost
+      // while they keep holding.
+      if (state.phase === 'idle' || (state.phase === 'met' && !progress)) {
+        const deadlineAt = time + check.ref.deadline;
+        const armed = this.#trace.append({ kind: 'liveness.armed', time, cause: stepStart, check: ref, since: time, deadlineAt });
+        Object.assign(state, { phase: 'waiting', since: time, armedEntry: armed, deadlineSeq: null });
+        if (!progress) state.deadlineSeq = this.#scheduler.schedule(deadlineAt, { kind: 'liveness.deadline', check: i, cause: armed });
+      }
+      if (progress && (state.phase === 'waiting' || state.phase === 'missed')) {
+        if (state.deadlineSeq !== null) this.#scheduler.cancel(state.deadlineSeq);
+        const start = state.since as number;
+        this.#trace.append({ kind: 'liveness.met', time, cause: stepStart, check: ref, since: start, duration: time - start, late: state.phase === 'missed' });
+        Object.assign(state, { phase: 'met', deadlineSeq: null });
+      }
+    }
     return null;
   }
 
@@ -391,7 +457,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       stopReason: this.#stopReason,
       scheduler: {
         nextSeq: this.#scheduler.nextSeq,
-        events: this.#scheduler.liveEvents().map(({ time, seq, event }) => ({ time, seq, event: toSnapshotEvent(event) })),
+        events: this.#scheduler.liveEvents().map(({ time, seq, event }) => ({ time, seq, event: toSnapshotEvent(event, this.config.liveness.map((c) => c.ref.id)) })),
       },
       network: { random: this.#network.randomState(), partition, links },
       nodes: [...this.#nodes.values()].map((node) => ({
@@ -408,6 +474,19 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
         random: node.random.getState(),
       })),
       invariants: this.#monitor?.exportState() ?? null,
+      liveness:
+        this.#liveness.length === 0
+          ? null
+          : {
+              checks: this.#liveness.map((state, i) => ({
+                id: this.config.liveness[i]!.ref.id,
+                version: this.config.liveness[i]!.ref.version,
+                phase: state.phase,
+                since: state.since,
+                armedEntry: state.armedEntry,
+                deadlineSeq: state.deadlineSeq,
+              })),
+            },
     };
     return toFrozenJson(raw, 'snapshot') as unknown as SimulationSnapshot;
   }
@@ -440,10 +519,14 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     this.#trace = prefix === null ? new EventTrace(position.traceLength) : new EventTrace(0, prefix);
     this.#lastEntryBeforeSegment = position.lastEntryFingerprint;
     const faults = new Map(this.config.faults.map((fault) => [fault.id, fault]));
+    const checkIndex = new Map(this.config.liveness.map((check, i) => [check.ref.id, i]));
     this.#scheduler = EventScheduler.restore<SimEvent>({
       now: position.time,
       nextSeq: snap.scheduler.nextSeq,
-      events: snap.scheduler.events.map(({ time, seq, event }) => ({ time, seq, event: fromSnapshotEvent(event, faults) })),
+      events: snap.scheduler.events.map(({ time, seq, event }) => ({ time, seq, event: fromSnapshotEvent(event, faults, checkIndex) })),
+    });
+    snap.liveness?.checks.forEach((saved, i) => {
+      Object.assign(this.#liveness[i]!, { phase: saved.phase, since: saved.since, armedEntry: saved.armedEntry, deadlineSeq: saved.deadlineSeq });
     });
     this.#network = new VirtualNetwork(this.config.network, Xoshiro128.fromState(snap.network.random));
     if (snap.network.partition !== null) this.#network.partition(snap.network.partition.groups, snap.network.partition.since);
@@ -573,6 +656,25 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
 
       case 'fault':
         return this.#applyFault(event.fault, event.cause);
+
+      case 'liveness.deadline': {
+        // The deadline of a waiting period is reached: the expected progress did not happen.
+        // Progress or broken assumptions would have cancelled this event, so it is always a miss.
+        const state = this.#liveness[event.check];
+        const check = this.config.liveness[event.check];
+        if (state?.phase !== 'waiting' || check === undefined) throw new EngineInvariantError('stale liveness deadline dispatched');
+        this.#trace.append({
+          kind: 'liveness.missed',
+          time,
+          cause: event.cause,
+          check: { id: check.ref.id, version: check.ref.version, name: check.ref.name },
+          since: state.since as number,
+          deadlineAt: time,
+          assumptions: check.ref.assumptions,
+        });
+        Object.assign(state, { phase: 'missed', deadlineSeq: null });
+        return true;
+      }
     }
   }
 
@@ -803,10 +905,12 @@ function describeError(error: unknown): string {
   }
 }
 
-function toSnapshotEvent(event: SimEvent): SnapshotEvent {
+function toSnapshotEvent(event: SimEvent, livenessIds: readonly string[]): SnapshotEvent {
   switch (event.kind) {
     case 'fault':
       return { kind: 'fault', faultId: event.fault.id, cause: event.cause };
+    case 'liveness.deadline':
+      return { kind: 'liveness.deadline', checkId: livenessIds[event.check] as string, cause: event.cause };
     case 'message.deliver': {
       const { id, from, to, payload, sentAt } = event.message;
       return { kind: 'message.deliver', message: { id, from, to, payload, sentAt }, cause: event.cause };
@@ -816,10 +920,12 @@ function toSnapshotEvent(event: SimEvent): SnapshotEvent {
   }
 }
 
-function fromSnapshotEvent(event: SnapshotEvent, faults: ReadonlyMap<string, Fault>): SimEvent {
+function fromSnapshotEvent(event: SnapshotEvent, faults: ReadonlyMap<string, Fault>, checks: ReadonlyMap<string, number>): SimEvent {
   switch (event.kind) {
     case 'fault':
       return { kind: 'fault', fault: faults.get(event.faultId) as Fault, cause: event.cause };
+    case 'liveness.deadline':
+      return { kind: 'liveness.deadline', check: checks.get(event.checkId) as number, cause: event.cause };
     case 'timer.fire':
       return { ...event, timer: Object.freeze({ ...event.timer }) };
     default:

@@ -62,13 +62,24 @@ Delivered: engine snapshots (ADR-0015), keyframes / seeking / trace regeneration
 - Time travel = restore the nearest snapshot ≤ target, then re-execute.
 - **Acceptance:** metamorphic property `run(N) ≡ restore(snap@k) + run(N−k)` for random k, random experiments and random fault plans.
 
-## CP4 — Raft leader election
+## CP4 — Raft leader election (implemented; awaiting review)
 
-- RequestVote/AppendEntries heartbeats; randomized election timeouts from `ctx.random`; `currentTerm` and `votedFor` in persistent storage.
-- **Bounded liveness checking** (deferred from CP2): properties like "a leader exists by t=…", evaluated at deadlines and reported separately from safety violations.
-- Invariants: **Election Safety** (≤ 1 leader per term); terms monotonic per node; a node votes at most once per term.
-- Thousands of seeds with random crash and partition plans. Failures are shrunk by fast-check to minimal fault plans.
-- **Acceptance:** zero safety violations across ≥ 10 000 randomized experiments; a known-bad variant (vote not persisted) is caught and shrunk.
+Design: [ADR-0018](adr/0018-raft-election-model.md) (Raft election, invariants, broken variants), [ADR-0019](adr/0019-bounded-liveness.md) (bounded liveness), [ADR-0020](adr/0020-comparison-and-counterexamples.md) (comparison, counterexample format 2). Rule-by-rule mapping: [RAFT.md](RAFT.md). Semantics: [SEMANTICS §17–18](SEMANTICS.md). Results: [TEST_STRATEGY](TEST_STRATEGY.md#cp4-results).
+
+**Scope:** leader election only. Log replication, commitment and state-machine safety stay in CP8 and are not claimed.
+
+**Acceptance criteria and status:**
+
+1. Raft election per Figure 2 (§5.1, 5.2, 5.4.1): follower / candidate / leader, monotonic durable `currentTerm` and `votedFor` persisted before dependent replies, one vote per term, majorities of ⌊n/2⌋+1, randomized timeouts from `ctx.random`, RequestVote, empty-AppendEntries heartbeats, correct timer resets, step-down on any higher term, crash recovery from storage. Explicit transition tests per rule. ✅
+2. Historical safety invariants from real events: Election Safety (per term, whole history), term monotonicity, one vote per term, leader-has-quorum (delivered grants + durable self-vote, conflict check, protocol counter not trusted), term adoption. "One leader at any moment" deliberately **not** enforced. ✅
+3. Bounded liveness as a separate engine feature: assumptions, configured test bound D, real deadline events, no false results under permanent minority partitions, never reported as safety. ✅
+4. ≥ 10 000 generated experiments (3/4/5 nodes, default and tight timeouts, partitions, heals, crashes/recoveries, lost and delayed messages) with zero safety violations; deterministic CI subset; `npm run test:explore` for random seeds. ✅
+5. Six broken variants (five planned; the planned "no step-down" was split into `no-step-down` and `ignore-higher-term` because the first version never reached the step-down path), each found by exploration, minimised (1-minimal), stored (format 2), replayed deterministically (also from a mid-run snapshot), and contrasted with the correct protocol under the same experiment. ✅
+6. Naive-vs-Raft comparison A–F (plus B2) under identical external conditions; pinned, reproducible results; the CP2 crash-only counterexample stored as a fixture. ✅
+7. Engine `0.4.0-cp4`, snapshot format `/2`; CP0–CP3 fingerprints reproduced through `projectTrace`; no historical fixture modified. ✅
+8. Measurements (cluster sizes, timer cancellation/compaction, heartbeat trace volume, invariant and liveness overhead, history growth). ✅ New finding **PERF-5**.
+9. Mutation pass on Raft rules, invariants and liveness: 32 / 33 killed, 1 equivalent. ✅
+10. ADRs, docs, Dutch ENGINEERLOG entry, UI data requirements for Raft. ✅
 
 ## CP5 — Worker boundary and minimal UI shell
 
@@ -105,9 +116,17 @@ Profile before optimising. Targets: 100+ nodes, 10⁶+ events. Candidates: trace
 3. seeking latency and its outliers (PERF-4);
 4. browser responsiveness during large simulations (main thread vs. Worker);
 5. garbage-collection behaviour (allocation per step and per frame);
-6. performance while scrubbing repeatedly (sustained `frameAt` / `seek` calls).
+6. performance while scrubbing repeatedly (sustained `frameAt` / `seek` calls);
+7. invariant history growth and per-step history copying (PERF-5), measured on long Raft runs with leader churn;
+8. Worker responsiveness: message latency and backpressure while a large simulation runs off the main thread;
+9. main-thread rendering performance (frame time while scrubbing and animating real traces);
+10. large Raft traces with many heartbeats (≈ 0.11–0.14 entries per tick per node; e.g. 25 nodes ≈ 3.4 entries per tick) through the whole pipeline: engine → transfer → TraceIndex → rendering.
 
-PERF-1 (CP1 benchmark outliers) and PERF-2 (invariant view construction) remain open as separate investigations.
+Profile first; optimise only when a measurement justifies it. Correctness and determinism remain mandatory: every optimisation must keep the golden fingerprints, the snapshot equivalence and the immutability tests passing unchanged.
+
+PERF-1 (CP1 benchmark outliers), PERF-2 (invariant view construction) and PERF-5 (history copying) remain open as separate investigations.
+
+**Open investigation PERF-5 — invariant history copied every step (found in CP4).** The engine passes every history an invariant returns through `toFrozenJson`, a full validating deep copy, after every step, even when the invariant returns the unchanged, already-frozen history. With Raft's historical invariants under leader churn (a new term every ~350 ticks), per-step cost grows with history size: 14 µs per step at 3 275 steps (20 000 ticks, ≈ 9 KB of history) to 36 µs per step at 25 978 steps (160 000 ticks, ≈ 72 KB), while runs without invariants stay at ≈ 5 µs per step. Total time therefore grows super-linearly with run length. Healthy runs (one term) do not grow. Candidate, after profiling: skip the copy when the returned history is the identical, already validated object (keeps every guarantee), and/or let historical invariants use structurally shared persistent maps. Must be understood before long interactive Raft runs (CP5/CP6).
 
 **Open investigation PERF-2 — invariant view construction.** With invariants enabled, ≈ 5 µs per step is spent building the frozen `SimulationView`, independent of the checkers (CP2 measurement: 528 → 1 026 ms per 100 000 events for one no-op invariant). Measurements are preserved in [TEST_STRATEGY, CP2 results](TEST_STRATEGY.md#runtime-verification-overhead) (0 / 1 / 5 invariants, plus the no-op decomposition showing that building the frozen view is the main cost). Candidates, to be decided only after profiling: reuse `NodeView` objects for nodes whose state/status/storage did not change (immutability makes reuse safe), avoid per-step closures, let invariants declare which entry kinds can affect them, and avoid re-validating unchanged history. **Constraint:** any optimisation must keep the same correctness and isolation guarantees with less allocation and copying, never by weakening them. Determinism and runtime immutability take precedence over speed, and the existing graph-walk, mutation-attempt and golden-fingerprint tests must pass unchanged.
 

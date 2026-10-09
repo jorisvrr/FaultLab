@@ -1,6 +1,7 @@
 import { ConfigError } from './errors';
 import { resolveFaults, type Fault, type FaultSpec } from './faults';
 import { DEFAULT_MAX_VIOLATIONS, resolveInvariants, type Invariant, type InvariantPolicy, type ResolvedInvariant } from './invariants';
+import { resolveLiveness, type LivenessCheck, type ResolvedLivenessCheck } from './liveness';
 import type { JsonValue } from './json';
 import type { NetworkConfig } from './network';
 import type { NodeId, Protocol } from './protocol';
@@ -35,17 +36,20 @@ export interface SimulationConfig<S extends JsonValue = JsonValue, M extends Jso
   readonly invariants?: readonly Invariant[];
   /** Default `stop-on-first` (ADR-0013). */
   readonly invariantPolicy?: InvariantPolicy;
+  /** Bounded, conditional liveness checks (CP4, ADR-0019). Never stop the run. */
+  readonly liveness?: readonly LivenessCheck[];
 }
 
 export type ResolvedConfig<S extends JsonValue, M extends JsonValue> = Omit<
   SimulationConfig<S, M>,
-  'limits' | 'faults' | 'invariants' | 'invariantPolicy'
+  'limits' | 'faults' | 'invariants' | 'invariantPolicy' | 'liveness'
 > & {
   readonly limits: Limits;
   /** Validated, normalised fault plan with ids f1…fn. */
   readonly faults: readonly Fault[];
   readonly invariants: readonly ResolvedInvariant[];
   readonly invariantPolicy: InvariantPolicy;
+  readonly liveness: readonly ResolvedLivenessCheck[];
 };
 
 export const DEFAULT_LIMITS: Limits = Object.freeze({
@@ -71,7 +75,7 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
 ): ResolvedConfig<S, M> {
   const input: unknown = config;
   if (!isRecord(input)) throw new ConfigError('config', 'must be an object');
-  rejectUnknownKeys(input, ['seed', 'nodes', 'protocol', 'network', 'limits', 'faults', 'invariants', 'invariantPolicy'], 'config');
+  rejectUnknownKeys(input, ['seed', 'nodes', 'protocol', 'network', 'limits', 'faults', 'invariants', 'invariantPolicy', 'liveness'], 'config');
 
   const seed = input['seed'];
   if (!Number.isInteger(seed) || (seed as number) < 0 || (seed as number) >= 2 ** 32) {
@@ -137,6 +141,7 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
   if (!POLICIES.includes(invariantPolicy as InvariantPolicy)) {
     throw new ConfigError('invariantPolicy', `must be one of ${POLICIES.join(', ')}`);
   }
+  const liveness = resolveLiveness(input['liveness']);
 
   return Object.freeze({
     seed: seed as number,
@@ -152,6 +157,7 @@ export function resolveConfig<S extends JsonValue, M extends JsonValue>(
     faults,
     invariants,
     invariantPolicy: invariantPolicy as InvariantPolicy,
+    liveness,
   });
 }
 

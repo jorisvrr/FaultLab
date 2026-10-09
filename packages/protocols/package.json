@@ -1,0 +1,22 @@
+{
+  "name": "@faultlab/protocols",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Protocol implementations for FaultLab (CP4: Raft leader election), with their invariants and liveness checks.",
+  "license": "MIT",
+  "author": "Joris van Rijn",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:explore": "FAULTLAB_FC_SEED=random FAULTLAB_EXPLORE=full vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "bench": "FAULTLAB_BENCH=1 vitest run"
+  },
+  "devDependencies": {
+    "@faultlab/engine": "*",
+    "@faultlab/trace": "*"
+  }
+}

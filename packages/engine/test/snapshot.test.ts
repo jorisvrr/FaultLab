@@ -9,6 +9,8 @@ import type { JsonValue } from '../src/json';
 import { Simulation } from '../src/simulation';
 import { SNAPSHOT_LIMITS, SnapshotError, type SimulationSnapshot } from '../src/snapshot';
 import { fingerprintTrace, serializeTrace } from '../src/trace';
+import { projectTrace } from '../src/legacy';
+import { ENGINE_VERSION } from '../src/version';
 import { faultPlanArb } from './arbitraries';
 import { configFor, type CounterexampleFixture } from './counterexample-format';
 import { mutabilityProblems, protocol } from './helpers';
@@ -203,7 +205,8 @@ describe('snapshot properties', () => {
       const cfg = configFor(fixture);
       const half = runTo(cfg, Math.floor(fixture.expected.eventNumber / 2));
       const result = Simulation.restore(cfg, roundTrip(half.snapshot()), { tracePrefix: half.trace }).run();
-      expect(fingerprintTrace(result.trace)).toBe(fixture.expected.fingerprint);
+      const trace = fixture.engineVersion === ENGINE_VERSION ? result.trace : projectTrace(result.trace, fixture.engineVersion as never);
+      expect(fingerprintTrace(trace as never)).toBe(fixture.expected.fingerprint);
     }
   });
 });
@@ -238,6 +241,7 @@ describe('restore rejects malformed or incompatible snapshots (untrusted input)'
 
   it.each<[string, (s: Record<string, any>) => void, string | RegExp]>([
     ['a wrong format', (s) => (s['format'] = 'faultlab-snapshot/0'), 'format'],
+    ['a CP3 (v1) snapshot', (s) => (s['format'] = 'faultlab-snapshot/1'), 'format'],
     ['another engine version', (s) => (s['engineVersion'] = '0.2.0-cp1'), 'engineVersion'],
     ['different inputs (seed)', (s) => (s['inputs'].seed = 8), 'inputs'],
     ['different inputs (fault plan)', (s) => s['inputs'].faults.pop(), 'inputs'],
@@ -315,7 +319,7 @@ describe('restore rejects malformed or incompatible snapshots (untrusted input)'
     try {
       Simulation.restore(config, tamper((s) => (s['engineVersion'] = '0.2.0-cp1')));
     } catch (error) {
-      expect((error as Error).message).toBe('snapshot engineVersion: snapshot is from engine 0.2.0-cp1; this is 0.3.0-cp2');
+      expect((error as Error).message).toBe(`snapshot engineVersion: snapshot is from engine 0.2.0-cp1; this is ${ENGINE_VERSION}`);
     }
   });
 

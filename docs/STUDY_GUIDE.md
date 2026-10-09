@@ -122,6 +122,28 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 
 **Exercise:** sketch how compressed-sparse-row arrays would replace the per-entry child arrays (PERF-3), and how you would prove frames stay identical.
 
+## 18. Raft leader election (CP4) — `packages/protocols/src/raft/election.ts`, `docs/RAFT.md`
+
+**Know:** why `ignore-higher-term` cannot demonstrate a missing step-down (nobody is ever elected), and how `no-step-down` does; the three roles and every transition in Figure 2; why `currentTerm` and `votedFor` must be durable *before* the reply leaves (and how `sync-on-commit` gives that for free); why ⌊n/2⌋+1 and not ⌈n/2⌉; why a rejected vote does not reset the election timer; what happens to a leader that sees a higher term.
+
+**Exercise:** for each of the six broken variants, name the Figure 2 rule it breaks, then open its stored counterexample in `test/counterexamples/` and explain the fault plan event by event.
+
+## 19. Historical invariants for Raft — `packages/protocols/src/raft/invariants.ts`
+
+**Know:** Election Safety (per term, whole history) versus "one leader at a time"; why `leader-has-quorum` counts *delivered* grants plus a *durable* self-vote and ignores `votesGranted`; the split-vote false positive and why the durable state is the right evidence.
+
+**Exercise:** write a hand-made view in which correct Raft has two nodes in `role: 'leader'` at once, and explain why no invariant should fire.
+
+## 20. Bounded liveness — `packages/engine/src/liveness.ts`, `#checkLiveness` in `simulation.ts`, `packages/protocols/src/raft/liveness.ts`
+
+**Know:** the phase machine (idle → waiting → met / missed, disarmed); why deadlines are real scheduler events; why D is a test bound and not a Raft property; how the healthy-group assumption avoids false misses in a 2|2 split.
+
+**Exercise:** construct a run where a check is met late, and say exactly which trace entries appear and what each `cause` points to.
+
+## 21. Fair comparison — `packages/protocols/test/comparison.ts`
+
+**Know:** what is held equal between the protocols (external conditions) and what is not (their internals); how every metric is derived from the trace; why scenario B uses seed 1 and what B2 (seed 3) shows.
+
 ## Interview-style questions to practise
 
 - Why integer ticks instead of float milliseconds? What would break first with floats?
@@ -140,3 +162,8 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 - What exactly is in a FaultLab snapshot, and how did you prove nothing is missing?
 - Why can the UI inspect entry #386 but never resume execution from it?
 - Your memory benchmark reported negative numbers. What was wrong with the method, and how did you fix it?
+- Two nodes both believe they are Raft leader right now. Is that a bug? What would you check first?
+- Why can Raft not elect a leader in a 4-node cluster split 2|2, and why is that the correct behaviour?
+- Your liveness check reported 13 misses although every run had a working leader. How did you find out the check was wrong, not Raft?
+- Why does a deliberately broken variant need to be *found* by exploration rather than written by hand?
+- A correct split-vote retry was flagged as "leader without quorum". What was the invariant's wrong assumption?

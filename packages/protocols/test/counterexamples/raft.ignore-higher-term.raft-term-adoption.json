@@ -1,0 +1,53 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:ignore-higher-term: messages with a higher term are ignored instead of adopted (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:ignore-higher-term",
+    "version": "1",
+    "variant": "ignore-higher-term",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-term-adoption",
+    "version": "1"
+  },
+  "config": {
+    "seed": 0,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 2500,
+    "faults": []
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 1,
+    "originalFaultCount": 0,
+    "shrinkSteps": 4,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 0
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 260,
+    "nodes": [
+      "n3",
+      "n1"
+    ],
+    "observed": "n3 stayed in term 0",
+    "eventNumber": 5,
+    "fingerprint": "62bdc088"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "b2aa92c4"
+  }
+}

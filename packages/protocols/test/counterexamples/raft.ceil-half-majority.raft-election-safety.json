@@ -1,0 +1,69 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:ceil-half-majority: two disjoint halves of a 4-node cluster can both elect a leader in one term (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:ceil-half-majority",
+    "version": "1",
+    "variant": "ceil-half-majority",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-election-safety",
+    "version": "1"
+  },
+  "config": {
+    "seed": 2989984903,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 2500,
+    "faults": [
+      {
+        "at": 0,
+        "type": "partition",
+        "groups": [
+          [
+            "n1",
+            "n2"
+          ],
+          [
+            "n3",
+            "n4"
+          ]
+        ]
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 69,
+    "originalFaultCount": 1,
+    "shrinkSteps": 3,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 1
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 245,
+    "nodes": [
+      "n3",
+      "n1"
+    ],
+    "observed": "Term 1 was led by n3 and also by n1",
+    "eventNumber": 16,
+    "fingerprint": "7d9c3383"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "a849dd4e"
+  }
+}

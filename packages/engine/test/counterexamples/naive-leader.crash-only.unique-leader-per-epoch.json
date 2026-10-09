@@ -1,0 +1,78 @@
+{
+  "format": "faultlab-counterexample/1",
+  "description": "naive-leader: crashes alone reuse an epoch, no network fault (CP2 finding; stored as a fixture in CP4 after crash/recover-only exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "naive-leader",
+    "version": "1",
+    "options": {
+      "interval": 20,
+      "jitter": 5,
+      "timeout": 60
+    }
+  },
+  "invariant": {
+    "id": "unique-leader-per-epoch",
+    "version": "1"
+  },
+  "config": {
+    "seed": 0,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 10
+    },
+    "maxTime": 1000,
+    "faults": [
+      {
+        "at": 0,
+        "type": "crash",
+        "node": "n1"
+      },
+      {
+        "at": 0,
+        "type": "crash",
+        "node": "n4"
+      },
+      {
+        "at": 71,
+        "type": "recover",
+        "node": "n1"
+      },
+      {
+        "at": 0,
+        "type": "crash",
+        "node": "n2"
+      },
+      {
+        "at": 70,
+        "type": "crash",
+        "node": "n3"
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 424242,
+    "runsUntilFailure": 41,
+    "originalFaultCount": 9,
+    "shrinkSteps": 32,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 5
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 140,
+    "nodes": [
+      "n3",
+      "n1"
+    ],
+    "observed": "Epoch 1 was led by n3 and later also by n1",
+    "eventNumber": 30,
+    "fingerprint": "2205e14a"
+  }
+}

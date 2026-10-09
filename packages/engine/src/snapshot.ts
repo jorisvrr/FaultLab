@@ -21,7 +21,8 @@ import { isIntIn, isRecord } from './validation';
  * inside a step. See SEMANTICS §13–14.
  */
 
-export const SNAPSHOT_FORMAT = 'faultlab-snapshot/1';
+/** v2 (CP4): adds bounded-liveness state and the `liveness.deadline` event. v1 snapshots are rejected. */
+export const SNAPSHOT_FORMAT = 'faultlab-snapshot/2';
 
 /** Number of completed simulation steps (= dispatched scheduled events). */
 export type StepCount = number;
@@ -41,7 +42,8 @@ export type SnapshotEvent =
       readonly incarnation: number;
       readonly cause: EntryIndex;
     }
-  | { readonly kind: 'fault'; readonly faultId: string; readonly cause: EntryIndex };
+  | { readonly kind: 'fault'; readonly faultId: string; readonly cause: EntryIndex }
+  | { readonly kind: 'liveness.deadline'; readonly checkId: string; readonly cause: EntryIndex };
 
 export interface NodeSnapshot {
   readonly id: NodeId;
@@ -90,6 +92,17 @@ export interface SimulationSnapshot {
   readonly invariants: {
     readonly violations: number;
     readonly states: readonly { readonly id: string; readonly version: string; readonly history: JsonValue; readonly open: string | null }[];
+  } | null;
+  /** Bounded-liveness state per configured check (CP4), or null when none are configured. */
+  readonly liveness: {
+    readonly checks: readonly {
+      readonly id: string;
+      readonly version: string;
+      readonly phase: 'idle' | 'waiting' | 'met' | 'missed';
+      readonly since: VirtualTime | null;
+      readonly armedEntry: EntryIndex | null;
+      readonly deadlineSeq: EventSeq | null;
+    }[];
   } | null;
 }
 
@@ -293,6 +306,7 @@ export function validateSnapshot(
   check(Array.isArray(events) && events.length <= config.limits.maxPendingEvents + config.limits.maxPendingEvents, 'scheduler.events', 'must be an array within the pending-event limit');
   const seqs = new Set<EventSeq>();
   const firedTimers = new Set<EventSeq>();
+  const deadlineEvents = new Map<EventSeq, { checkId: string; time: number; cause: number }>();
   const faultIds = new Map(config.faults.map((fault) => [fault.id, fault]));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   let previous: { time: number; seq: number } | null = null;
@@ -342,6 +356,12 @@ export function validateSnapshot(
         firedTimers.add(seq);
         break;
       }
+      case 'liveness.deadline': {
+        check(config.liveness.some((c) => c.ref.id === event['checkId']), `${path}.event.checkId`, 'must reference a configured liveness check');
+        expectKind(cause, `${path}.event.cause`, 'liveness.armed', (e) => e.kind === 'liveness.armed' && e.check.id === event['checkId'] && e.deadlineAt === t);
+        deadlineEvents.set(seq, { checkId: event['checkId'] as string, time: t, cause });
+        break;
+      }
       default:
         throw new SnapshotError(`${path}.event.kind`, 'unknown event kind');
     }
@@ -361,6 +381,34 @@ export function validateSnapshot(
       check('history' in state, `invariants.states[${i}].history`, 'is required');
       check(state['open'] === null || /^v[1-9][0-9]*$/.test(String(state['open'])), `invariants.states[${i}].open`, 'must be null or a violation id');
     });
+  }
+
+  // ── bounded liveness ──
+  const liveness = snap['liveness'];
+  if (config.liveness.length === 0) {
+    check(liveness === null, 'liveness', 'must be null: no liveness checks are configured');
+    check(deadlineEvents.size === 0, 'scheduler.events', 'contains liveness deadlines although no checks are configured');
+  } else {
+    check(isRecord(liveness) && Array.isArray(liveness['checks']) && liveness['checks'].length === config.liveness.length, 'liveness.checks', 'must match the configured liveness checks');
+    const claimed = new Set<EventSeq>();
+    (liveness['checks'] as unknown[]).forEach((state, i) => {
+      const path = `liveness.checks[${i}]`;
+      const expected = config.liveness[i]!.ref;
+      check(isRecord(state) && state['id'] === expected.id && state['version'] === expected.version, path, `must be ${expected.id}@${expected.version}`);
+      const phase = state['phase'];
+      check(['idle', 'waiting', 'met', 'missed'].includes(phase as string), `${path}.phase`, 'must be idle, waiting, met or missed');
+      const idle = phase === 'idle';
+      check(idle ? state['since'] === null && state['armedEntry'] === null : isIntIn(state['since'], 0, time), `${path}.since`, 'must be null exactly while idle, otherwise a time ≤ now');
+      if (!idle) expectKind(ref(state['armedEntry'], `${path}.armedEntry`), `${path}.armedEntry`, 'liveness.armed', (e) => e.kind === 'liveness.armed' && e.check.id === expected.id);
+      const seq = state['deadlineSeq'];
+      if (phase === 'waiting') {
+        const deadline = deadlineEvents.get(seq as number);
+        check(deadline !== undefined && deadline.checkId === expected.id && deadline.time === (state['since'] as number) + expected.deadline && deadline.cause === state['armedEntry'],
+          `${path}.deadlineSeq`, 'a waiting check needs its own deadline event at since + deadline');
+        claimed.add(seq as number);
+      } else check(seq === null, `${path}.deadlineSeq`, 'only a waiting check has a pending deadline');
+    });
+    check(claimed.size === deadlineEvents.size, 'scheduler.events', 'every liveness deadline event must belong to a waiting check');
   }
 
   return snap as unknown as SimulationSnapshot;

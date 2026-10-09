@@ -1346,3 +1346,426 @@ Een meetmethode kan zelf een bug hebben. Onlogische uitkomsten, zoals negatief g
 - De TraceIndex verdubbelt ongeveer het geheugen (PERF-3), en sommige sprongen hebben trage uitschieters (PERF-4, oorzaak niet gemeten). Beide moeten begrepen zijn vóór de echte tijdlijn.
 - De TraceIndex werkt alleen op volledige traces, niet op segmenten.
 - npm 11 meldt dat het installatiescript van `fsevents` (een optionele macOS-dependency van Playwright) niet is goedgekeurd. Het is ook niet nodig, dus bewust niet goedgekeurd.
+
+---
+
+## CP4 — Raft: leiderverkiezing
+
+**Datum:** 2026-10-09 · **Status:** geïmplementeerd, wacht op review · **Engine-versie:** `0.4.0-cp4`
+
+In CP2 bouwden we een opzettelijk onveilig leider-algoritme en zagen we het falen. In CP4 komt het echte werk: de **leiderverkiezing van Raft**, rechtstreeks volgens Figure 2 en §5 van het artikel van Ongaro en Ousterhout. Daarbij hoort een nieuw soort controle (begrensde liveness), een grote zoektocht door 10 000 foutscenario's, vijf opzettelijk kapotte Raft-varianten en een eerlijke vergelijking met het naïeve algoritme. **Log-replicatie zit hier níét in**; dat is CP8. Ontwerp: ADR-0018 t/m ADR-0020, `docs/RAFT.md`, SEMANTICS §17–18.
+
+### CP4.1 — Waarom consensus, en waarom een leider?
+
+**1. Wat hebben we gebouwd?**
+Een nieuw pakket `@faultlab/protocols` met `createRaftElection()`. Vijf (of drie, of vier) nodes kiezen samen precies één leider, ook als er nodes crashen en het netwerk in stukken valt.
+
+**2. Waarom is dit nodig?**
+*Gedistribueerde consensus* betekent: meerdere computers worden het eens over één waarde, terwijl sommige crashen of elkaar niet kunnen bereiken. Een database met drie kopieën moet bijvoorbeeld weten welke kopie de schrijfopdrachten aanneemt. Raft lost dat op door eerst een **leider** te kiezen; die beslist, de rest volgt. Is de leiderverkiezing onveilig, dan krijg je twee leiders die elk iets anders beslissen: *split brain*. Dat zagen we in CP2.
+
+**3. Hoe werkt het?**
+Het naïeve protocol uit CP2 dacht: "ik hoor niemand met een hoger nummer, dus ík ben de leider". Stilte werd als bewijs gezien. Raft vraagt om echt bewijs: **stemmen van een meerderheid**. Wie die niet krijgt, wordt geen leider.
+
+**4. Welke keuzes zijn gemaakt?**
+- Een apart pakket, zodat de engine niets van Raft weet. Het pakket mag alleen *types* uit de engine importeren; een architectuurtest dwingt dat af.
+- Het artikel is de bron van waarheid. In `docs/RAFT.md` staat elke regel uit Figure 2 met het citaat erbij, en hoe FaultLab hem uitvoert.
+- De velden voor de log (`lastLogIndex`, `entries: []` …) zitten al in de berichten, met waarde 0. CP8 kan ze dan uitbreiden zonder alles om te gooien.
+
+**5. Welke problemen kwamen we tegen?**
+De verleiding om "Raft" te zeggen terwijl het alleen de verkiezing is. Overal staat daarom expliciet wat níét geclaimd wordt: geen log-replicatie, geen veiligheid van vastgelegde entries.
+
+**6. Hoe hebben we het getest?**
+✅ 24 transitietests: per regel uit Figure 2 een test met een "opnemende" context die precies laat zien welke berichten, timers en schrijfacties een stap oplevert.
+
+**7. Wat heb ik hiervan geleerd?**
+Een algoritme uit een artikel implementeren betekent eerst de regels letterlijk opschrijven, en pas dán coderen.
+
+**8. Belangrijkste begrippen**
+- **Consensus:** overeenstemming tussen computers die kunnen falen.
+- **Leiderverkiezing:** het kiezen van één node die beslissingen neemt.
+- **Split brain:** twee nodes die tegelijk denken dat zij de baas zijn, en elk iets anders beslissen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "ik hoor niemand met een hoger nummer" geen betrouwbaar bewijs dat jij de leider mag zijn? Geef een scenario.
+2. Waarom is het verstandig dat de engine niets van Raft weet?
+
+### CP4.2 — Drie rollen en termijnen
+
+**1. Wat hebben we gebouwd?**
+Elke node is **follower**, **candidate** of **leader**, en houdt een **term** bij: een termijnnummer dat alleen maar stijgt.
+
+**2. Waarom is dit nodig?**
+De term is een logische klok voor verkiezingen. Elke verkiezing krijgt een nieuw nummer. Zo weet iedereen welke informatie oud is.
+
+**3. Hoe werkt het?**
+- Een follower die te lang niets van een leider hoort (zijn *election timeout* verloopt), wordt candidate: term + 1, stemt op zichzelf, vraagt de anderen om een stem (`RequestVote`).
+- Met stemmen van een meerderheid wordt hij leader en stuurt hij meteen *heartbeats* (lege `AppendEntries`) om de anderen rustig te houden.
+- **Ziet een node ooit een hogere term, dan wordt hij meteen follower in die term.** Ook een leader. Dit is de belangrijkste regel van Figure 2 ("All Servers").
+- Verzoeken met een lagere term worden geweigerd; oude antwoorden worden genegeerd.
+
+**4. Welke keuzes zijn gemaakt?**
+Gedrag dat het artikel niet letterlijk beschrijft, is vastgelegd in RAFT.md. Een voorbeeld: een leader die een `AppendEntries` met **dezelfde** term krijgt. Dat zou betekenen dat er twee leiders in één term zijn. Hij stapt dan af, en de invariant meldt de fout; we verbergen hem niet.
+
+**5. Welke problemen kwamen we tegen?**
+Welke timer reset je wanneer? Een geweigerde stem reset de timer níét; een toegekende wel. Anders kan een stoorzender een node eindeloos stilhouden.
+
+**6. Hoe hebben we het getest?**
+✅ Transitietests voor elke overgang, ✅ mutatietests: elke regel één voor één kapotmaken (17 mutanten op de regels, zie CP4.9).
+
+**7. Wat heb ik hiervan geleerd?**
+Een toestandsmachine (*state machine*) maakt een protocol testbaar: per toestand en per bericht is er precies één juiste reactie.
+
+**8. Belangrijkste begrippen**
+- **Term:** oplopend verkiezingsnummer, werkt als logische klok.
+- **Heartbeat:** periodiek bericht van de leider: "ik leef nog".
+- **Step down:** afstappen naar follower bij een hogere term.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Een oude leader komt terug na een partitie en stuurt heartbeats met term 2, terwijl de anderen in term 5 zitten. Wat gebeurt er, stap voor stap?
+2. Waarom reset een *geweigerde* stem de election timer niet?
+
+### CP4.3 — Stemmen die een crash overleven
+
+**1. Wat hebben we gebouwd?**
+`currentTerm` en `votedFor` staan in de duurzame opslag van de node. Na een crash leest `init` ze terug.
+
+**2. Waarom is dit nodig?**
+Stel dat een node in term 3 op A stemt, crasht, en zijn stem vergeet. Na herstel stemt hij in term 3 op B. Nu kunnen A én B allebei een meerderheid halen: twee leiders in één term. De variant `volatile-voted-for` doet precies dit, en de verkenning vond het (CP4.8).
+
+**3. Hoe werkt het?**
+Raft eist "eerst opslaan, dan antwoorden". In FaultLab is dat gratis: de engine legt de opslag van een stap vast **voordat** de berichten van die stap vertrekken (`sync-on-commit`, sinds CP1). Een stem en het antwoord erop zitten dus in dezelfde stap, in de goede volgorde, zichtbaar in de trace (`storage.write` vóór `message.send`).
+
+**4. Welke keuzes zijn gemaakt?**
+De rol, de ontvangen stemmen en de timers zijn bewust *vluchtig*: na een crash begint een node altijd als follower.
+
+**5. Welke problemen kwamen we tegen?**
+Geen bug, wel een inzicht: de engine-keuze uit CP1 (eerst opslag, dan berichten) blijkt precies de regel te zijn die Raft nodig heeft.
+
+**6. Hoe hebben we het getest?**
+✅ Hersteltests (term en stem worden teruggelezen), ✅ de varianten `volatile-voted-for` en `volatile-term` worden gevangen, met opgeslagen tegenvoorbeelden.
+
+**7. Wat heb ik hiervan geleerd?**
+"Wat moet een crash overleven?" is een ontwerpvraag die je per variabele moet beantwoorden.
+
+**8. Belangrijkste begrippen**
+- **Duurzame (persistente) toestand:** overleeft een crash.
+- **Vluchtige toestand:** gaat verloren bij een crash.
+- **Crash recovery:** herstarten met alleen de duurzame toestand.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom moet de stem *vóór* het antwoord opgeslagen zijn? Wat kan er misgaan als het andersom gebeurt?
+2. Waarom hoeft de lijst met ontvangen stemmen níét duurzaam te zijn?
+
+### CP4.4 — Meerderheid en quorum-intersectie
+
+**1. Wat hebben we gebouwd?**
+`majorityOf(n) = ⌊n/2⌋ + 1`: 2 van 3, 3 van 4, 3 van 5. Altijd van het **hele** cluster, ook als een deel onbereikbaar is.
+
+**2. Waarom is dit nodig?**
+Twee meerderheden van hetzelfde cluster hebben altijd **minstens één node gemeen** (*quorum-intersectie*). Die node stemt maar één keer per term. Dus kunnen er nooit twee winnaars in dezelfde term zijn. Dat is het hele veiligheidsargument, in één zin.
+
+**3. Hoe werkt het?**
+Bij 4 nodes is ⌈4/2⌉ = 2 géén meerderheid: {n1, n2} en {n3, n4} hebben niets gemeen. De variant `ceil-half-majority` gebruikt precies die fout. Met een 2|2-partitie kozen beide helften een leider in term 1 (opgeslagen tegenvoorbeeld).
+
+**4. Welke keuzes zijn gemaakt?**
+Stemmen worden geteld als een **verzameling**: een dubbel afgeleverd antwoord telt één keer.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Gemeten: clusters met 4 nodes hebben de langste verkiezingen (3 stemmen nodig, net als bij 5, maar met minder kandidaten).
+
+**6. Hoe hebben we het getest?**
+✅ Unit-tests per clustergrootte, ✅ exploratie met 3, 4 en 5 nodes, ✅ de ceil-variant gevonden en opgeslagen.
+
+**7. Wat heb ik hiervan geleerd?**
+Een off-by-one in "de helft" is geen klein foutje maar breekt de hele veiligheid, en alleen bij een even aantal nodes.
+
+**8. Belangrijkste begrippen**
+- **Quorum:** de minimale groep die samen mag beslissen.
+- **Quorum-intersectie:** elke twee quorums overlappen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Bewijs in eigen woorden dat twee meerderheden van 5 nodes altijd een node delen.
+2. Waarom is ⌈n/2⌉ veilig voor n = 5, maar niet voor n = 4?
+3. Een 4-node cluster wordt 2|2 gesplitst. Waarom is "geen leider" hier het *juiste* gedrag?
+
+### CP4.5 — Partities, split votes en willekeurige timeouts
+
+**1. Wat hebben we gebouwd?**
+Election timeouts worden per reset willekeurig gekozen uit [150, 300] ticks, uit de eigen random-stream van de node.
+
+**2. Waarom is dit nodig?**
+Als twee nodes tegelijk kandidaat worden, kan de stemming gelijk opgaan (*split vote*): niemand haalt een meerderheid. Met gelijke timeouts gebeurt dat elke ronde opnieuw. Met willekeurige timeouts is er bijna altijd één node net iets eerder.
+
+**3. Hoe werkt het?**
+✅ Gemeten in de exploratie: met de normale timeouts haalt elke run waarin het kon binnen de grens een leider. Met een bewust smalle range ([150, 155]) zijn er veel herhaalde split votes, en gaat de liveness-grens in 282 van de 3 312 runs mis. Het artikel (§9.3) beschrijft hetzelfde.
+
+**4. Welke keuzes zijn gemaakt?**
+De smalle timeouts zitten bewust in de exploratie, juist om split votes en gelijktijdige timeouts uit te lokken. Hun liveness-missers worden gerapporteerd, niet als fout geteld.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Een onverwacht, maar correct gedrag: een geïsoleerde *follower* blijft timeouts krijgen en zijn term ophogen. Na het herstel van de partitie dwingt zijn hoge term de gezonde leider om af te stappen (scenario B2). Dit heet een *disruptive server*; Raft zonder "PreVote" doet dit echt. Het staat in RAFT.md §7.
+
+**6. Hoe hebben we het getest?**
+✅ Exploratie met partities in maximaal drie groepen, herstel, en vertraagde of verloren berichten.
+
+**7. Wat heb ik hiervan geleerd?**
+Toeval kan een algoritme *betrouwbaarder* maken: het breekt de symmetrie.
+
+**8. Belangrijkste begrippen**
+- **Split vote:** een stemronde zonder winnaar.
+- **Symmetrie breken:** zorgen dat gelijke deelnemers zich toch verschillend gedragen.
+- **Partitie:** het netwerk valt in groepen die elkaar niet bereiken.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom helpt een willekeurige timeout tegen split votes? Waarom garandeert het niets?
+2. Leg scenario B2 uit: waarom stapt een gezonde leider af door een node die net terugkomt?
+
+### CP4.6 — Veiligheidsinvarianten uit echte gebeurtenissen
+
+**1. Wat hebben we gebouwd?**
+Vijf historische invarianten: Election Safety (hoogstens één leider **per term**, over de hele run), termen dalen nooit, één stem per term, *leader-has-quorum*, en "hogere term wordt overgenomen".
+
+**2. Waarom is dit nodig?**
+Een invariant moet het protocol controleren, niet het protocol geloven. Daarom kijken ze naar echte gebeurtenissen in de trace: verzonden en **afgeleverde** stemmen, en de **duurzame** opslag. De teller `votesGranted` van de leider zelf wordt genegeerd.
+
+**3. Hoe werkt het?**
+Belangrijkste onderscheid: Raft belooft **niet** "hoogstens één node denkt nu leider te zijn". Na een partitie kan een oude leader in de minderheid nog denken dat hij leider is, in een **oudere** term. Dat is toegestaan. De belofte is: nooit twee leiders in **dezelfde** term.
+
+**4. Welke keuzes zijn gemaakt?**
+*leader-has-quorum* eist: de duurzame opslag zegt "term T, ik stemde op mezelf", plus genoeg afgeleverde ja-stemmen in term T van verschillende nodes, en geen van die stemmers heeft in T óók iemand anders gesteund.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een vals alarm in mijn eigen invariant.** De eerste versie zocht naar een schrijfactie `votedFor = zelf` in de verkiezingsstap. Een proefrun (leider isoleren, daarna herstellen) gaf een overtreding bij het *correcte* protocol. Oorzaak: bij een tweede poging na een split vote staat `votedFor` al op "zelf", dus wordt alleen de term opnieuw geschreven. De invariant had het mis, niet Raft. Nu is het bewijs de duurzame toestand op het moment van de verkiezing. Er is een regressietest voor.
+
+**6. Hoe hebben we het getest?**
+✅ 20 unit-tests met zelfgemaakte views (ook: twee leiders tegelijk in verschillende termen → géén fout), ✅ elk kapotte variant wordt door de juiste invariant gevangen, ✅ 8 mutanten op de invarianten, allemaal gevangen.
+
+**7. Wat heb ik hiervan geleerd?**
+Een test die je schrijft vanuit dezelfde aanname als de code, vindt die aanname nooit. De fout kwam pas boven door het systeem echt te laten draaien.
+
+**8. Belangrijkste begrippen**
+- **Election Safety:** hoogstens één leider per term, over de hele geschiedenis.
+- **Historische invariant:** een controle die onthoudt wat eerder gebeurde.
+- **Vals positief:** een alarm terwijl er niets mis is.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "twee nodes zijn nu leider" bij Raft niet altijd een fout? Wanneer wél?
+2. Waarom telt *leader-has-quorum* afgeleverde stemmen, en niet verzonden stemmen?
+3. Leg het valse alarm uit: welke aanname was fout, en waarom vonden de unit-tests het niet?
+
+### CP4.7 — Safety versus liveness: begrensde liveness
+
+**1. Wat hebben we gebouwd?**
+Een nieuw soort controle in de engine: `LivenessCheck`. Hij zegt: "als deze **aannames** gelden en er nog geen voortgang is, moet die er binnen **D** ticks komen."
+
+**2. Waarom is dit nodig?**
+- **Safety:** er gebeurt nooit iets slechts. Dat kun je na elke stap controleren.
+- **Liveness:** er gebeurt uiteindelijk iets goeds. Dat kun je in een eindige run nooit bewijzen; "uiteindelijk" kan altijd nog komen.
+
+Raft garandeert géén tijdslimiet voor een verkiezing. D is daarom een **gemeten testverwachting onder vastgelegde aannames**, géén universele garantie dat Raft binnen D een leider kiest. De aannames staan in de trace.
+
+**3. Hoe werkt het?**
+- Gaan de aannames gelden, dan plant de engine een **echt event** op tijdstip nu + D (`liveness.deadline`). Komt de voortgang eerder, dan wordt het event geannuleerd. Zo niet, dan verschijnt `liveness.missed` op precies dat tijdstip, ook als er verder niets gebeurt.
+- Vallen de aannames weg (bijvoorbeeld een 2|2-partitie: geen meerderheid), dan wordt de controle uitgezet (`liveness.disarmed`): geen verwachting, dus ook geen valse misser.
+- Liveness-resultaten zijn nooit `invariant.violation` en stoppen de run nooit.
+
+**4. Welke keuzes zijn gemaakt?**
+✅ D = 1500 ticks, gekozen uit 6 000 gemeten verkiezingen (3/4/5/7 nodes): het slechtste geval was 885 ticks, p99 ≤ 656. D is vijf keer de maximale timeout.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een fout in mijn eigen liveness-controle.** De eerste versie bepaalde de "gezonde groep" door bij elke slechte link één van de twee nodes weg te laten. In 13 van 1 000 runs was dat toevallig de leider. Daardoor zag de controle "geen leider in de groep", terwijl alle gezonde nodes die leider gewoon volgden: 13 valse missers. De oplossing is beide uiteinden van een slechte link uit te sluiten; de leider zelf mag wél op een slechte link zitten. Daarna: 0 missers in alle 6 688 runs met normale timeouts (van de 10 000 met vaste seed).
+
+**6. Hoe hebben we het getest?**
+✅ 37 engine-tests (configuratiecontrole, exacte deadline-tijden, een stille scheduler, uitzetten en opnieuw aanzetten, voortgang die verloren gaat, kapotte controles, snapshots met een openstaande deadline), ✅ 17 Raft-livenesstests (ook: een echte misser op een Raft-run, opnieuw wachten na een gecrashte leider, en het gezondheidsfilter bij één slechte link), ✅ 8 mutanten op liveness, allemaal gevangen.
+
+✅ **Werd de controle eigenlijk wel gebruikt?** "Geen missers" zegt niets als de controle nooit actief was. Elke run begint gezond, dus "minstens één keer actief" (100 %) bewijst niets. Daarom is gemeten hoe vaak de aanname echt gold (CI-subset van 1 000 runs): 60,8 % van alle virtuele tijd; in runs met fouten was de controle ná de eerste fout actief in 78,9 % van de runs, gedurende 43,9 % van die tijd. Er waren 1 488 wachtperiodes, waarvan 1 166 gehaald. De test eist ondergrenzen op deze cijfers, zodat de controle niet ongemerkt stil kan vallen. Eerlijke kanttekening: het gezondheidsfilter is voorzichtig. In een cluster van 3 nodes zet één slechte link de controle al uit (getest en gedocumenteerd).
+
+**7. Wat heb ik hiervan geleerd?**
+Als een controle faalt, controleer dan óók de controle. En als een controle níét faalt: controleer of hij wel aan stond. 13 "missers" met een werkende leider waren een bug in de meetlat, niet in Raft.
+
+**8. Belangrijkste begrippen**
+- **Safety-eigenschap:** iets slechts gebeurt nooit.
+- **Liveness-eigenschap:** iets goeds gebeurt uiteindelijk.
+- **Aanname (assumption):** de voorwaarde waaronder voortgang verwacht wordt.
+- **Testgrens:** een gekozen maximum om te testen, geen garantie.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kun je liveness niet bewijzen met één eindige run?
+2. Waarom moet de deadline een echt event in de scheduler zijn? Wat gaat er mis als je alleen bij andere events controleert?
+3. Waarom levert een permanente 2|2-partitie géén liveness-misser op? Is dat valsspelen?
+
+### CP4.8 — Exploratie en zes kapotte varianten
+
+**1. Wat hebben we gebouwd?**
+- Een generator voor experimenten: 3/4/5 nodes, normale of smalle timeouts, meer of minder vertraging, en tot 8 foutgroepen (crash + herstel, partities, herstel van het netwerk, verloren en vertraagde berichten).
+- ✅ **2 × 10 000 experimenten met correct Raft (vaste seed 20261008 en een willekeurige seed −2125180925): nul safety-overtredingen.** In CI draait elke keer een vaste subset van 1 000. Ook geteld: 6 542 runs met concurrerende kandidaten, 6 195 met een mislukte verkiezing, 1 679 waarin een oude leader een hogere term tegenkwam, 602 waarin twee nodes tegelijk dachten leider te zijn (in verschillende termen, dus toegestaan).
+- Zes varianten met elk precies één fout: `volatile-voted-for`, `volatile-term`, `double-vote`, `ceil-half-majority`, `no-step-down` en `ignore-higher-term`. (Gepland waren er vijf; waarom het er zes werden, staat in CP4.12.)
+
+**2. Waarom is dit nodig?**
+Slagen bewijst alleen iets als de tests óók kunnen falen. De kapotte varianten laten zien dat elke regel ertoe doet, én dat de invarianten de fouten echt vinden.
+
+**3. Hoe werkt het?**
+Per variant zoekt fast-check een experiment dat de bijbehorende invariant breekt. Daarna wordt het verkleind tot een minimaal faultplan, opnieuw afgespeeld (ook vanaf een snapshot halverwege), en met **correct** Raft onder exact hetzelfde experiment gedraaid: daar 0 overtredingen. Negen tegenvoorbeelden zijn opgeslagen.
+
+**4. Welke keuzes zijn gemaakt?**
+Geen enkel tegenvoorbeeld is met de hand geschreven. Vindt de zoektocht niets, dan faalt de test. Zo bewijzen de voorbeelden wat het systeem doet, niet wat ik verwachtte.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Eerlijk resultaat: `ignore-higher-term` kiest **nooit** een leider (iedereen weigert hogere termen), dus breekt Election Safety ook niet. Wel "hogere term overnemen" en liveness. Dat staat zo in de docs; ik heb er geen Election-Safety-fout bij verzonnen.
+✅ Bijvangst: beide persistentiebugs kunnen óók twee leiders in één term veroorzaken. Dat vond de zoektocht na 951 experimenten, met een plan van 5 fouten.
+
+**6. Hoe hebben we het getest?**
+✅ Elke variant: gevonden, 1-minimaal, deterministisch afgespeeld, correct Raft schoon. ✅ Opgeslagen fixtures worden bij elke testrun opnieuw gecontroleerd.
+
+**7. Wat heb ik hiervan geleerd?**
+"10 000 keer geslaagd" is bewijs, geen wiskundig bewijs. Het zegt alleen iets over de scenario's die de generator kan maken. Daarom tel ik ook wélke scenario's echt voorkwamen (split votes, oude leiders die een hogere term zien, verloren berichten …).
+
+**8. Belangrijkste begrippen**
+- **Exploratie:** automatisch zoeken in de ruimte van foutscenario's.
+- **Shrinking / 1-minimaal:** verkleinen tot elke fout nodig is.
+- **Mutant:** een opzettelijk kapotte versie, om te zien of de tests hem vangen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Neem het opgeslagen tegenvoorbeeld van `volatile-voted-for` en leg elke fout uit het plan uit: waarom is elke fout nodig?
+2. Waarom is "correct Raft onder hetzelfde experiment" een belangrijk onderdeel van het bewijs?
+3. Wat kun je wél en níét concluderen uit 10 000 geslaagde experimenten?
+
+### CP4.9 — Naïef versus Raft, eerlijk vergeleken
+
+**1. Wat hebben we gebouwd?**
+Zeven scenario's (A–F, plus B2). Beide protocollen draaien met hetzelfde cluster, dezelfde seed, dezelfde vertraging en hetzelfde faultplan. Alle meetwaarden komen uit de trace en zijn vastgepind.
+
+**2. Waarom is dit nodig?**
+Om te laten zien wát Raft oplost, zonder de vergelijking te sturen.
+
+**3. Hoe werkt het?**
+- **C en D** zijn de opgeslagen tegenvoorbeelden uit CP2. Het naïeve protocol maakt daar twee leiders in dezelfde epoch. Raft kiest daar níémand, omdat er geen meerderheid bestaat: onbeschikbaar, maar veilig.
+- **E4** (2|2): naïef kiest aan beide kanten een leider; Raft kiest er geen enkele tot het herstel.
+- **B**: tijdens de isolatie heeft de meerderheidskant met Raft 72,8 % van de tijd een leider, naïef 88 %. Raft is trager (timeouts van 150–300 tegen 60), maar maakt geen fouten.
+- **F**: Raft zonder duurzame `votedFor` kiest twee leiders in term 1; correct Raft niet.
+
+**4. Welke keuzes zijn gemaakt?**
+De interne werking wordt níét gelijk getrokken. Alleen de buitenwereld is gelijk.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een eigen aanname die niet klopte.** Voor scenario B ("isoleer de gevestigde leider n5") schreef ik dat Raft met seed 3 ook n5 als leider had. Een test liet zien dat het n3 was. Nu gebruikt B seed 1 (beide protocollen kiezen n5, en dat wordt getest), en seed 3 is scenario B2 geworden, omdat het iets echts laat zien (de disruptive server).
+✅ Het CP2-tegenvoorbeeld "alleen crashes" bestond alleen als inline test, niet als fixture. Het is opnieuw gevonden met een zoektocht met alleen crashes en herstel, en opgeslagen met echte zoekgegevens.
+
+**6. Hoe hebben we het getest?**
+✅ 14 tests: per scenario de kwalitatieve uitkomst, plus alle cijfers en fingerprints vastgepind in `results.json`.
+
+**7. Wat heb ik hiervan geleerd?**
+Raft ruilt beschikbaarheid in voor veiligheid. Zonder meerderheid doet het liever niets dan iets fouts. Dat is precies wat het CAP-theorema voorspelt.
+
+**8. Belangrijkste begrippen**
+- **Beschikbaarheid:** het systeem kan beslissingen nemen.
+- **CAP:** bij een partitie moet je kiezen tussen consistentie en beschikbaarheid.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is het eerlijk om de buitenwereld gelijk te houden en de interne werking niet?
+2. In scenario D kiest Raft nooit een leider. Waarom is dat beter dan wat het naïeve protocol doet?
+
+### CP4.10 — Versies en oude bewijsstukken
+
+**1. Wat hebben we gebouwd?**
+Engineversie `0.4.0-cp4` (nieuwe trace-entries `liveness.*` en het veld `run.start.liveness`), snapshotformaat `/2`, en tegenvoorbeeldformaat `/2` (met een protocolvariant en het resultaat van correct Raft).
+
+**2. Waarom is dit nodig?**
+De trace verandert, dus de versie moet omhoog. Maar oude bewijsstukken mogen niet verloren gaan.
+
+**3. Hoe werkt het?**
+`projectTrace` (nu in de engine zelf) zet een nieuwe trace om naar een ouder formaat. Zo worden de oude golden fingerprints van CP0 t/m CP3 nog steeds exact gehaald, en spelen de CP2-fixtures (opgenomen met `0.3.0-cp2`) nog exact af. **Geen enkele oude fixture is aangepast.** Een fixture-schrijver overschrijft nooit een bestaand bestand.
+
+**4. Welke keuzes zijn gemaakt?**
+Een CP3-snapshot (`/1`) wordt met een duidelijke foutmelding geweigerd, omdat hij geen liveness-toestand kan beschrijven.
+
+**5. Welke problemen kwamen we tegen?**
+✅ De README beloofde nog fingerprint `09f7b23f` voor het voorbeeld. Met `0.4.0-cp4` is dat `7fda34b3`; de oude waarde geldt alleen via de projectie. Aangepast.
+
+**6. Hoe hebben we het getest?**
+✅ Projectietests voor CP0, CP1 en CP2/CP3, ✅ oude fixtures via projectie, ✅ een CP3-snapshot wordt geweigerd.
+
+**7. Wat heb ik hiervan geleerd?**
+Een versiebump is pas veilig als je kunt aantonen dat het oude gedrag nog precies te reproduceren is.
+
+**8. Belangrijkste begrippen**
+- **Projectie:** een nieuw formaat terugvertalen naar een oud.
+- **Regressiefixture:** een opgeslagen voorbeeld dat nooit meer mag veranderen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom mocht de engineversie in CP3 gelijk blijven, maar moest hij in CP4 omhoog?
+2. Waarom is het overschrijven van een oude fixture "om de test te laten slagen" gevaarlijk?
+
+### CP4.11 — Prestaties meten
+
+**1. Wat hebben we gemeten?** ✅ (Apple-silicon laptop, Node 24; zie TEST_STRATEGY)
+- **Verkiezingen:** de eerste leider komt bij 3 tot 25 nodes na een mediaan van 192 → 165 ticks. Grotere clusters zijn iets sneller: er is altijd wel één node met een korte timeout.
+- **Trace-volume door heartbeats:** ongeveer 0,12 entries per tick per node; 2,4 MB JSON per 20 000 ticks bij 5 nodes. Elke heartbeat levert per follower vijf entries op, ook een `state.update`, omdat de nieuwe timer-id in de state zit.
+- **Timers:** 16 000 geannuleerde timers in 200 000 ticks, maar de heap blijft klein (max 29 entries) en compaction is nooit nodig. Dode timers verlopen vanzelf binnen 300 ticks.
+- **Kosten van controles:** 5 nodes, 20 000 ticks: 13 ms zonder, 36 ms met de vijf invarianten, 34 ms met alleen liveness, 49 ms met allebei. Het meeste is het bouwen van de bevroren view (PERF-2).
+- **Groei van de geschiedenis:** bij één stabiele leider blijft die constant. Bij een nieuwe term elke ~350 ticks groeit hij lineair met het aantal termen (≈ 72 KB na 465 termen).
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Nieuw: PERF-5.** Met een groeiende geschiedenis worden de stappen zelf trager: van 14 naar 36 µs per stap. De engine kopieert en bevriest de hele geschiedenis na élke stap, ook als die niet veranderd is. Vastgelegd als open onderzoek, bewust niet nu opgelost (geen ongevraagde optimalisaties).
+
+**7. Wat heb ik hiervan geleerd?**
+Een veiligheidsmaatregel (alles kopiëren en bevriezen) heeft een prijs die pas zichtbaar wordt bij lange runs.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom zou het overslaan van de kopie bij een *ongewijzigde* geschiedenis geen enkele garantie verzwakken?
+2. Waarom levert elke heartbeat een `state.update` op, en wat betekent dat voor de grootte van de trace?
+
+### CP4.12 — Review: toonde `no-step-down` wel wat de naam belooft?
+
+**1. Wat hebben we gebouwd?**
+De oude variant `no-step-down` is gesplitst in twee varianten met elk precies één fout:
+- `ignore-higher-term`: negeert elk bericht met een hogere term (het oude gedrag, nu met een eerlijke naam);
+- `no-step-down`: neemt de hogere term wél over (en slaat hem op), maar wordt **geen follower**. Een leider blijft dus leider, nu in de nieuwe term.
+
+**2. Waarom is dit nodig?**
+Bij de review kwam de vraag: test deze variant wel het ontbrekende *afstappen*? Het antwoord was nee. Als niemand een hogere term overneemt, krijgt geen kandidaat ooit een tweede stem en wordt er **nooit een leider gekozen** (0 van 300 runs). Dan bestaat er ook geen leider die zou moeten afstappen. Alleen één unit-test met een zelfgemaakte leider-toestand raakte die code. De variant "faalde" wel een invariant (term-adoptie), en dat leek op succes, maar het bedoelde defect werd nooit getoond.
+
+**3. Hoe werkt het?**
+Een gerichte regressietest laat de hele keten zien (5 nodes, seed 1):
+1. n5 wordt onder gezonde omstandigheden leider (t=202), zonder enige overtreding;
+2. n5 wordt geïsoleerd (t=400); de meerderheid kiest n4 in term 2;
+3. na het herstel (t=900) krijgt n5 een bericht met term 2, slaat term 2 op, maar blijft leider (t=909);
+4. `raft-election-safety` meldt: "Term 2 was led by n4 and also by n5", met verwijzingen naar beide leiderschappen.
+
+Correct Raft met exact hetzelfde plan: n5 wordt follower in term 2, nul overtredingen. De exploratie vindt het defect ook zelfstandig (run 25, 2 fouten).
+
+**4. Welke keuzes zijn gemaakt?**
+Geen invariant afgezwakt, geen overtreding verzonnen. Het oude, nog niet gecommitte fixture is verwijderd en onder de nieuwe naam opnieuw gegenereerd. Dat staat expliciet in TEST_STRATEGY, zodat niemand denkt dat er stilletjes een fixture is aangepast.
+
+**5. Welke problemen kwamen we tegen?**
+De verleiding om het oude resultaat te laten staan: "de variant wordt gevangen". Dat was waar, maar door de verkeerde invariant en om de verkeerde reden.
+
+**6. Hoe hebben we het getest?**
+✅ Unit-test per variant, ✅ de gerichte regressietest, ✅ exploratie + opgeslagen tegenvoorbeeld, ✅ correct Raft schoon onder hetzelfde experiment.
+
+**7. Wat heb ik hiervan geleerd?**
+Een kapotte variant moet het pad bereiken dat hij zegt te breken. "De test faalt" is pas bewijs als hij faalt om de juiste reden.
+
+**8. Belangrijkste begrippen**
+- **Stale leader:** een oude leider die nog niet weet dat er een nieuwere term is.
+- **Afstappen (step down):** terug naar follower bij een hogere term.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kiest `ignore-higher-term` nooit een leider? Loop een verkiezing met drie nodes stap voor stap door.
+2. Waarom kan `no-step-down` wél twee leiders in één term veroorzaken? Gebruik het opgeslagen tegenvoorbeeld (n4 geeft zelfs zijn stem aan n1).
+3. Waarom is "de variant wordt door een invariant gevangen" niet hetzelfde als "het bedoelde defect is aangetoond"?
+
+### CP4 — Kwaliteitscontrole
+
+- ✅ Mutatietesten (opnieuw gedraaid op de definitieve code): 33 mutanten op de Raft-regels, de invarianten, de liveness-controle en de engine-liveness. **32 gevangen.** R15 ("leader start verkiezingen") is *equivalent* binnen de bereikbare toestanden: een leader heeft nooit een election timer (die wordt bij het leiderschap geannuleerd en op `null` gezet, en alleen afstappen maakt een nieuwe), dus de extra rolcontrole is overbodig. Een test over 300 runs bevestigt dat: in meer dan 1 000 leider-toestanden is `electionTimer` steeds `null`.
+- De zwakste vangsten (door maar één test): stemmen voor oude termen toekennen (R4), een stemmer dubbel tellen (R8), off-by-one in de term-monotonie (I2) en in term-adoptie (I8), en conflicterende stemmers (I5).
+- Het harnas herstelt elk bestand in `finally` en controleert daarna checksums.
+
+### CP4 — Bekende beperkingen
+
+- Alleen leiderverkiezing: geen log, geen commit, geen veiligheid van de state machine (CP8). De "up-to-date log"-regel (§5.4.1) is met een lege log altijd waar en dus níét getest.
+- Geen PreVote: een teruggekeerde node kan een gezonde leider afzetten (B2).
+- Het netwerk dupliceert nooit berichten; dubbele aflevering is alleen in unit-tests gecontroleerd.
+- De liveness-aanname "vertraging ≪ timeout" is tekst, geen controle per stap.
+- D = 1500 is een testgrens bij deze timing, geen eigenschap van Raft.
+- Open prestatieonderzoek: PERF-1 t/m PERF-5.

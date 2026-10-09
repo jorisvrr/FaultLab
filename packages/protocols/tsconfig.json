@@ -1,0 +1,6 @@
+{
+  // Like the engine: no DOM, no Node. Protocols import only engine TYPES.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": [], "noEmit": true },
+  "include": ["src"]
+}

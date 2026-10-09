@@ -7,6 +7,17 @@ import { ENGINE_VERSION } from '../src/version';
 import { configFor, type CounterexampleFixture } from './counterexample-format';
 import { isOneMinimal, violationOf } from './explore';
 import { fingerprintTrace } from '../src/trace';
+import { LEGACY_TRACE_VERSIONS, projectTrace, type LegacyTraceVersion } from '../src/legacy';
+
+/**
+ * Fixtures are never rewritten when the engine version changes. A fixture recorded by an OLDER
+ * engine is replayed with the current engine and checked through the documented legacy
+ * projection (SEMANTICS §16): its recorded fingerprint must be reproduced exactly. Any version
+ * without a projection fails loudly.
+ */
+const legacy = (version: string): version is LegacyTraceVersion => (LEGACY_TRACE_VERSIONS as readonly string[]).includes(version);
+const fingerprintFor = (fixture: CounterexampleFixture, trace: Parameters<typeof fingerprintTrace>[0]): string =>
+  fixture.engineVersion === ENGINE_VERSION ? fingerprintTrace(trace) : fingerprintTrace(projectTrace(trace, fixture.engineVersion as LegacyTraceVersion) as never);
 
 /**
  * Stored counterexamples are permanent regression tests (ADR-0014). Each one must replay to the
@@ -20,14 +31,17 @@ const fixtures = readdirSync(DIR)
 
 describe('stored counterexamples', () => {
   it('exist', () => {
-    expect(fixtures.length).toBeGreaterThanOrEqual(2);
+    expect(fixtures.length).toBeGreaterThanOrEqual(3);
   });
 
   describe.each(fixtures)('%s', (_name, fixture) => {
     it('is in a known format and matches the engine, protocol and invariant versions (never silently re-interpreted)', () => {
       expect(fixture.format, 'unknown counterexample format').toBe('faultlab-counterexample/1');
       // Any version mismatch means semantics may have changed: re-verify and regenerate on purpose.
-      expect(fixture.engineVersion, `fixture recorded with engine ${fixture.engineVersion}; current is ${ENGINE_VERSION}`).toBe(ENGINE_VERSION);
+      expect(
+        fixture.engineVersion === ENGINE_VERSION || legacy(fixture.engineVersion),
+        `fixture recorded with engine ${fixture.engineVersion}; current is ${ENGINE_VERSION} and no legacy projection exists for it`,
+      ).toBe(true);
       const protocolVersion = createNaiveLeaderProtocol(fixture.protocol.options).version;
       expect(fixture.protocol.version, `fixture recorded with ${fixture.protocol.name}@${fixture.protocol.version}; current is @${protocolVersion}`).toBe(protocolVersion);
       const invariant = naiveLeaderInvariants.find((i) => i.id === fixture.invariant.id);
@@ -50,7 +64,7 @@ describe('stored counterexamples', () => {
         nodes: violation.nodes,
         observed: violation.observed,
         eventNumber: violation.eventNumber,
-        fingerprint: fingerprintTrace(result.trace),
+        fingerprint: fingerprintFor(fixture, result.trace),
       }).toEqual(fixture.expected);
     });
 

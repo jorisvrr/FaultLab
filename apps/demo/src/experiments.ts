@@ -1,6 +1,11 @@
 import {
   ENGINE_VERSION,
+  fingerprintTrace,
+  LEGACY_TRACE_VERSIONS,
+  projectTrace,
   type FaultSpec,
+  type LegacyTraceVersion,
+  type TraceEntry,
   type Invariant,
   type JsonValue,
   type SimulationConfig,
@@ -19,6 +24,7 @@ import epochFixture from '../../../packages/engine/test/counterexamples/naive-le
 export type Describe = (state: JsonValue | undefined) => { label: string; emphasis: boolean } | null;
 
 export interface Expected {
+  /** Fingerprint as recorded by the fixture's engine version (see `fingerprintOf`). */
   readonly fingerprint: string;
   readonly violationTime: number;
   readonly nodes: readonly string[];
@@ -34,6 +40,11 @@ export interface Experiment {
   readonly describe: Describe;
   /** For stored counterexamples: the outcome recorded when the fixture was created. */
   readonly expected?: Expected;
+  /**
+   * Fingerprint of a trace in the fixture's own trace format: identical for current fixtures,
+   * via the engine's legacy projection for fixtures recorded by an older engine (SEMANTICS §16).
+   */
+  readonly fingerprintOf?: (trace: readonly TraceEntry[]) => string;
   /** Set when the experiment cannot be built faithfully (e.g. a version mismatch). */
   readonly problem?: string;
 }
@@ -79,7 +90,9 @@ function fromFixture(id: string, title: string, fixture: FixtureJson): Experimen
   const protocolVersion = createNaiveLeaderProtocol(fixture.protocol.options).version;
   const problems = [
     fixture.format !== 'faultlab-counterexample/1' && `unknown format ${fixture.format}`,
-    fixture.engineVersion !== ENGINE_VERSION && `recorded with engine ${fixture.engineVersion}, this is ${ENGINE_VERSION}`,
+    fixture.engineVersion !== ENGINE_VERSION &&
+      !(LEGACY_TRACE_VERSIONS as readonly string[]).includes(fixture.engineVersion) &&
+      `recorded with engine ${fixture.engineVersion}, this is ${ENGINE_VERSION}, and no legacy projection exists`,
     fixture.protocol.version !== protocolVersion && `recorded with naive-leader@${fixture.protocol.version}, this is @${protocolVersion}`,
     invariant?.version !== fixture.invariant.version && `invariant ${fixture.invariant.id}@${fixture.invariant.version} unavailable`,
   ].filter((p): p is string => typeof p === 'string');
@@ -90,6 +103,8 @@ function fromFixture(id: string, title: string, fixture: FixtureJson): Experimen
     source: 'stored counterexample',
     describe: describeLeader,
     expected: fixture.expected,
+    fingerprintOf: (trace) =>
+      fixture.engineVersion === ENGINE_VERSION ? fingerprintTrace(trace) : fingerprintTrace(projectTrace(trace, fixture.engineVersion as LegacyTraceVersion) as never),
     ...(problems.length > 0 ? { problem: problems.join('; ') } : {}),
     build: () =>
       ({

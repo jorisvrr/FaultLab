@@ -98,6 +98,128 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP4 results
+
+**Tests:** engine 416 (+3 fixture writers), `@faultlab/trace` 18, `@faultlab/protocols` 184 (+10 fixture/result writers that run only on request), demo 10, Playwright 6; all green; typechecks and the demo build pass. Coverage: protocols 100 % lines / 97.8 % branches; engine 98.1 % lines / 96.4 % branches; trace 100 % lines / 95.4 % branches (two TraceIndex liveness tests added after review: phases after every step vs. the engine, `liveness.missed` as a step trigger, markers).
+
+| Layer | What it proves | Where |
+|---|---|---|
+| Raft transitions | Every Figure 2 election rule as an explicit state-machine transition (recording `NodeContext`: exact sends, timer sets/cancels, storage writes) | `protocols/test/raft-transitions.test.ts` (25) |
+| Raft invariants | Positive and negative cases on hand-made views: stale leader in another term is legal; leader with a lying vote counter; undelivered / other-term / duplicated grants; non-durable self-vote; split-vote retry regression; conflicting voters; 4-node majority | `raft-invariants.test.ts` (20) |
+| Liveness framework | Config validation; exact deadline, as trigger of its own step, caused by its armed entry; quiet scheduler; cancellation on progress; disarm and re-arm; re-arm on lost progress; time-only conditions seen at the next step; faulty checks; snapshots with pending deadlines and 7 tamperings | `engine/test/liveness.test.ts` (37) |
+| Raft liveness | Healthy-group and progress predicates on hand-made views; healthy start (3/4/5 nodes × 20 seeds); leader isolation re-armed and met (10 seeds, isolating the actual leader); 2\|2\|1, 2\|2 and crash-only minorities disarm; a real miss on Raft (D = 100); re-arm after a leader crash; one degraded link keeps a 5-node check eligible, disarms a 3-node one | `raft-liveness.test.ts` (17) |
+| Exploration | Correct Raft, all five invariants, CI subset of 1 000 experiments (fixed seed) + coverage of 18 scenario categories + liveness eligibility + default-timing liveness + leaders never hold an election timer (R15) + replay | `raft-exploration.test.ts` |
+| Broken variants | Each found, 1-minimal, byte-identical replay, correct protocol clean under the same experiment; focused `no-step-down` regression (leader established first, then a higher term); `ignore-higher-term` never elects | `raft-broken-variants.test.ts` |
+| Stored counterexamples | 10 Raft fixtures (`/2`): versions, exact violation and fingerprint, replay from a mid-run snapshot (segment), 1-minimality, recorded correct-protocol outcome | `raft-counterexample-replay.test.ts` |
+| Replay compatibility | Snapshot/restore equivalence with Raft + liveness (40 runs, with/without prefix, JSON); time-travel seek (25); TraceIndex frames incl. liveness phases vs. the engine after every step (20); causal chain of an election | `raft-replay.test.ts` |
+| Comparison | Scenarios A–F + B2, qualitative assertions + pinned metrics and fingerprints | `comparison.test.ts` (14) |
+| Architecture | Protocols import engine types only; no runtime deps; no `Math.random`/`Date`/timers | `protocols/test/architecture.test.ts` |
+
+### Exploration (≥ 10 000 experiments)
+
+Generator (`protocols/test/raft-experiments.ts`): 3/4/5 nodes; default timeouts [150, 300] (⅔) or deliberately tight [150, 155] (⅓); base latency 1–10 or 1–25; 10 % fault-free; otherwise up to 8 fault groups over t ∈ [0, 1500]: crash+recovery outages (0–600 ticks), crashes, arbitrary partitions into 2–3 groups, heals, lossy links (20–100 %), delayed links (+0–500 ticks), link restores. Run length 2 500 ticks; all five invariants (record-and-continue); liveness D = 1500.
+
+| Run | Experiments | Safety violations | Liveness misses, default timing | Liveness misses, tight timing | Time |
+|---|---|---|---|---|---|
+| `FAULTLAB_EXPLORE=full`, fixed seed 20261008 | 10 000 | **0** | **0** / 6 688 | 282 / 3 312 | 44 s |
+| `npm run test:explore`, random seed −2125180925 | 10 000 | **0** | **0** / 6 681 | 266 / 3 319 | ≈ 45 s |
+| CI subset (every `npm test`), seed 20261008 | 1 000 | 0 | 0 | reported | ≈ 5 s |
+
+Scenario coverage in the fixed-seed run (experiments in which it occurred): competing candidates in one term 6 542 · failed election (a term with a candidate but no leader) 6 195 · leader elected 9 144 · old leader met a higher term 1 679 · stale-term message delivered 2 179 · two leader beliefs at once (different terms) 602 · recovery 4 992 · partition 4 869 · heal 3 786 · lost message 1 330 · delayed link 3 809 · liveness met 8 073. Highest term reached: 16. **Passing is evidence, not a proof**: it covers what this generator produces.
+
+**Was the liveness check actually exercised?** Every run starts healthy, so "armed at least once" (100 %) proves nothing. Measured eligibility (the healthy-majority assumption holds) in the 1 000-experiment CI subset:
+
+| Subset | Experiments | Eligible after the first fault (experiments) | Share of post-fault time eligible | Share of all time eligible | Waiting periods | Met | Missed |
+|---|---|---|---|---|---|---|---|
+| all | 1 000 | — | — | 60.8 % | 1 488 | 1 166 | 35 |
+| with faults | 798 | 78.9 % | 43.9 % | 50.9 % | 1 286 | 970 | 20 |
+| fault-free | 202 | — | — | 100 % | 202 | 196 | 15 (all tight timing) |
+| default timing | 654 | 63.3 % | 43.8 % | 60.5 % | 1 005 | 858 | **0** |
+| 3 / 4 / 5 nodes | 329 / 326 / 345 | 60.5 / 51.2 / 76.5 % | 40.6 / 32.0 / 57.9 % | 57.0 / 54.2 / 70.8 % | 503 / 444 / 541 | 399 / 311 / 456 | 0 / 17 / 18 |
+
+| **full run, 10 000 (seed 20261008)** | 10 000 | 78.9 % of the 7 877 with faults | 41.4 % | 60.0 % | 14 683 | 11 667 | 282 (all tight timing; 0 with default timing) |
+
+(Percentages for timing and size subsets are over all their experiments, fault-free ones included.) So under faults the check is eligible in most experiments and for a substantial part of the time, with more periods met than experiments (it re-arms after lost progress). It is ineligible for ≈ 56 % of post-fault time, mostly because the generator applies many permanent partitions and degraded links, and because the health filter is conservative: in a 3-node cluster a single degraded link removes 2 of 3 nodes (tested). The exploration test asserts lower bounds on these figures, so the checker cannot silently go idle.
+
+**Liveness findings during exploration.** The first healthy-group rule produced 13 misses in 1 000 experiments although one leader was serving all healthy nodes (it could drop the leader itself from the group). Fixed in the check, not by raising D (FAILURE_MODES H6). Misses with tight timeouts are the expected effect of too little randomization (Raft paper §9.3) and are reported, not asserted.
+
+**Choice of D = 1500.** Election durations (time to `liveness.met`) over 500 seeds each:
+
+| n | healthy start p50 / p99 / max | leader crash p50 / p99 / max | leader isolation p50 / p99 / max |
+|---|---|---|---|
+| 3 | 196 / 281 / 410 | 196 / 548 / 885 | 191 / 533 / 669 |
+| 4 | 193 / 420 / 577 | 186 / 614 / 865 | 183 / 656 / 865 |
+| 5 | 188 / 265 / 521 | 175 / 357 / 421 | 170 / 362 / 409 |
+| 7 | 184 / 250 / 355 | 169 / 356 / 380 | 164 / 351 / 397 |
+
+### Broken variants (fast-check seed 4242 unless noted; all stored in `protocols/test/counterexamples/`)
+
+| Variant (rule broken) | Invariant | Experiment | Minimal plan | Violation |
+|---|---|---|---|---|
+| `volatile-voted-for` (Fig. 2 persistent state) | one-vote-per-term | 3 nodes, tight | crash+recover n1 at 151 | n1 voted for n1 and then for n2 in term 1 |
+| `volatile-voted-for` (seed 777, run 951) | election-safety | 3 nodes | 5 faults | Term 1 led by n1 and also by n3 |
+| `volatile-term` | term-monotonic | 4 nodes | crash+recover n2 at 211 | currentTerm 1 → 0 (incarnation 2) |
+| `volatile-term` (seed 777, run 951) | election-safety | 3 nodes | 5 faults | Term 1 led by n1 and also by n3 |
+| `double-vote` (RequestVote rule 2) | one-vote-per-term | 3 nodes | **no faults** | n2 voted for n2 and then for n3 in term 1 |
+| `double-vote` | election-safety | 3 nodes | **no faults** | Term 1 led by n2 and also by n3 |
+| `ceil-half-majority` (majority) | leader-has-quorum | 4 nodes | **no faults** | 2 votes evidenced; 3 required |
+| `ceil-half-majority` | election-safety | 4 nodes | partition 2\|2 at 0 | Term 1 led by n3 and also by n1 |
+| `no-step-down` (All Servers rule: "convert to follower") | election-safety | 5 nodes | partition 3\|2 at 0, then [n2] alone at 369 | Term 2 led by n4 and also by n1 |
+| `ignore-higher-term` (All Servers rule as a whole) | term-adoption | 3 nodes | **no faults** | n3 stayed in term 0 |
+
+In every case the correct protocol, under the identical experiment, has 0 violations (recorded in each fixture and re-checked).
+
+**The step-down variant, corrected before the first commit.** The first CP4 draft had one variant called `no-step-down` that *ignored* every message with a higher term. Review asked whether it exercised the intended defect, and it did not: with that bug no node ever adopts a candidate's newer term, so no candidate gets a second vote and **no leader is ever elected** (0 of 300 sampled experiments). The step-down path (a leader meeting a higher term) was therefore never reached in a real run; only a unit test on a hand-made leader state touched it. The variant was split, each still breaking exactly one rule:
+
+- `ignore-higher-term`: the old behaviour under an honest name. Detected by `raft-term-adoption`; it elects nobody, so it shows no Election Safety violation (reported, not invented).
+- `no-step-down`: adopts and persists the higher term but keeps its role. A focused regression test (5 nodes, seed 1) shows the full chain: n5 is elected at t=202 under healthy conditions with no violation; it is isolated at 400 and healed at 900; at t=909 it delivers a term-2 message, persists term 2 and stays leader while n4 leads term 2 → `raft-election-safety`: "Term 2 was led by n4 and also by n5" (references both leaderships; `raft-leader-has-quorum` also fires: no votes for term 2). Correct Raft under the identical plan: n5 becomes follower in term 2, 0 violations. Exploration finds it independently (run 25, 2 faults: leader n4 of term 1 adopts n1's term 2 while still leading and even grants n1 its vote).
+
+The superseded, never-committed fixture `raft.no-step-down.raft-term-adoption.json` was deleted and its successor regenerated as `raft.ignore-higher-term.raft-term-adoption.json` (same experiment and fault plan; only the variant name differs). Persistence bugs also fail `leader-has-quorum` at the first election (non-durable self-vote = missing evidence, stated in the violation text).
+
+The CP2 **crash-only** counterexample existed only inline (`naive-leader.test.ts`); CP4 rediscovered it with crash/recover-only exploration (seed 424242, run 41, 9 → 5 faults) and stored `engine/test/counterexamples/naive-leader.crash-only.unique-leader-per-epoch.json` (format `/1`, engine `0.4.0-cp4`, fingerprint `2205e14a`). The two CP2 fixtures are unchanged and replay through `projectTrace`.
+
+### Naive vs Raft (pinned in `protocols/test/comparison/results.json`)
+
+| | Naive | Raft |
+|---|---|---|
+| A healthy, 5 nodes | 1 leader (n5) at t=64; safe | 1 leader at t=202; safe; liveness met 212 |
+| B isolate leader n5 (400–900) | 2 leader beliefs for 450 ticks; majority side led 88 % | 2 beliefs (stale n5, older term) 373 ticks; new leader in a higher term with quorum; majority side led 72.8 %; recovered 9 ticks after heal; **0 safety violations** |
+| B2 same, seed 3 (n5 is a follower) | as B | safe; n5's inflated term deposes the healthy leader after the heal (no PreVote) |
+| C CP2 two-partition fixture, 4 nodes | **Epoch 2 led by n3 and later by n2** | no leader at all (no majority after the 2\|2 split); safe; liveness disarmed |
+| D CP2 crash-only fixture, 4 nodes | **Epoch 1 led by n3 and later by n1** | no leader (a majority is never running); safe |
+| E5 split 2\|3 | leaders on both sides for 752 ticks | leader only on the majority side; safe |
+| E4 split 2\|2 | leaders on both sides | **no election during the split**; leader 27 ticks after the heal; safe |
+| F `votedFor` not durable (stored fixture) | no violation | broken Raft: **Term 1 led by n1 and also by n3**; correct Raft: 0 violations |
+
+### Performance (Apple-silicon laptop, Node 24; `npm run bench --workspace @faultlab/protocols`)
+
+| Nodes | first leader median / max (50 seeds) | run 20 000 ticks | steps | entries | entries/tick | trace JSON |
+|---|---|---|---|---|---|---|
+| 3 | 192 / 282 | 8 ms | 1 987 | 6 763 | 0.34 | 1.3 MB |
+| 5 | 182 / 268 | 14 ms | 3 577 | 12 330 | 0.62 | 2.4 MB |
+| 7 | 177 / 257 | 21 ms | 5 168 | 17 906 | 0.90 | 3.6 MB |
+| 9 | 171 / 233 | 26 ms | 6 774 | 23 523 | 1.18 | 4.7 MB |
+| 15 | 167 / 196 | 49 ms | 11 556 | 40 266 | 2.01 | 8.1 MB |
+| 25 | 165 / 339 | 85 ms | 19 624 | 68 369 | 3.42 | 13.9 MB |
+
+- **Heartbeat trace volume:** ≈ 0.11–0.14 entries per tick per node in steady state. Per heartbeat and follower: deliver, timer cancel, timer set, response send, and a `state.update` (the new election-timer id is part of the state). Relevant to PERF-3.
+- **Timer cancellation / compaction:** 5 nodes, 200 000 ticks: 15 989 cancelled timers, heap never above 29 entries, **0 compactions**. Election timers are reset every 50 ticks but expire within 300, so dead entries leave the heap on their own; ADR-0011's threshold (1 024 dead) is never reached.
+- **Invariant and liveness overhead** (5 nodes, 20 000 ticks, 3 577 steps, 9 interleaved runs): none 13 ms · five invariants 36 ms · liveness only 34 ms · both 49 ms (≈ 6 µs per step each, mostly frozen-view construction: PERF-2).
+- **Invariant history growth:** with one stable leader the history is constant (≈ 0.5 KB). With leader churn (one isolation per 1 000 ticks, a new term every ≈ 350 ticks) it grows linearly with terms: 4.7 KB at 29 terms, 18 KB at 114, 72 KB at 465 (one-vote-per-term 48 KB, leader-has-quorum 18 KB, election-safety 5.5 KB, term-monotonic 0.2 KB).
+- **New: PERF-5.** Under that churn the per-step cost with invariants rises from 14 µs (20 000 ticks) to 36 µs (160 000 ticks), without invariants it stays ≈ 5 µs: the engine deep-copies (`toFrozenJson`) every returned history every step, even when unchanged. Recorded in the ROADMAP; not optimised in CP4.
+
+### CP4 mutation pass (33 mutants; harness restores in `finally`, checksums verified; run on the final code)
+
+| Group | Mutants (failing tests) | Result |
+|---|---|---|
+| Raft rules | R1 term not persisted (46) · R2 vote not persisted (45) · R3 ⌈n/2⌉ (22) · R4 grant stale terms (1) · R5 ignore votedFor (29) · R6 grant does not reset timer (32) · R7 count other-term votes (3) · R8 count a voter twice (1) · R9 reject current-term AppendEntries (38) · R10 heartbeat does not reset timer (32) · R11 step-down keeps votedFor (7) · R12 step down on equal term (80) · R13 no term increment (40) · R14 no immediate heartbeat (23) · R16 recovery ignores durable term (17) · R17 heartbeat not re-armed (27) | caught |
+| | R15 leader may start an election | **equivalent** under the reachable protocol states: `becomeLeader` cancels the election timer and sets it to `null`, and only leaving the leader role creates a new one, so no fired timer can match `state.electionTimer` while leading and the role guard is redundant. Confirmed by a test over 300 generated runs (> 1 000 leader states, every one with `electionTimer: null`), which, as expected for an equivalent mutant, does not kill R15 |
+| Raft invariants | I1 election safety never flags (29) · I2 term-monotonic tolerates −1 (1) · I3 self-votes ignored (4) · I4 quorum off by one (10) · I5 conflicting voters ignored (1) · I6 self-vote trusted without storage (2) · I7 sent instead of delivered grants (48) · I8 term adoption off by one (1) | caught |
+| Raft liveness | L1 degraded links healthy (5) · L2 progress without acknowledgement (6) · L3 minority assumptions (8) | caught |
+| Engine liveness | S1 no re-arm on lost progress (4 + 1 engine) · S2 progress does not cancel the deadline (25 + 4) · S3 deadline one tick late (3 + 9) · S4 disarm does not cancel (12 + 2) · S5 no deadline event (2 + 10) | caught |
+
+**Result: 32 of 33 detected; R15 classified as equivalent under the established reachable protocol states.** Weakest kills (one test): R4, R8, I2, I5, I8. Each is caught by a precise unit test; the system-level tests do not distinguish them, which is expected for defensive rules whose violation needs a specific message order.
+
 ## CP3 results
 
 **Tests:** engine 371 passing (+2 fixture writers), `@faultlab/trace` 16, demo 10, Playwright 6, all green; typechecks and the demo build pass. Coverage: engine 98.9 % lines / 96.1 % branches (`snapshot.ts` 100 / 97.8, `time-travel.ts` 100 / 89.7); trace 100 % lines / 96.6 % branches.

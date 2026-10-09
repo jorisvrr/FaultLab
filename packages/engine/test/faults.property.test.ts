@@ -148,6 +148,10 @@ describe('CP1 golden trace', () => {
     return runSimulation(heartbeatConfig({ seed: 2026, faults, latencyMax: 15 }));
   };
 
+  it('reproduces the CP2/CP3 fingerprint when projected onto the 0.3.0-cp2 trace format', () => {
+    expect(fingerprintTrace(projectTrace(faultReference().trace, '0.3.0-cp2') as never)).toBe('b10daf99');
+  });
+
   it('reproduces the CP1 fingerprint when projected onto the CP1 trace format (invariants disabled)', () => {
     expect(fingerprintTrace(projectTrace(faultReference().trace, '0.2.0-cp1') as never)).toBe('17b2dde2');
   });
@@ -160,6 +164,6 @@ describe('CP1 golden trace', () => {
       eventsProcessed: result.eventsProcessed,
       drops: ofKind(result.trace, 'message.drop').length,
       fingerprint: fingerprintTrace(result.trace),
-    }).toEqual({ engine: '0.3.0-cp2', eventsProcessed: 295, drops: 59, fingerprint: 'b10daf99' });
+    }).toEqual({ engine: '0.4.0-cp4', eventsProcessed: 295, drops: 59, fingerprint: '6a1dfe65' });
   });
 });

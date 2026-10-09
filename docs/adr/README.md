@@ -21,3 +21,6 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0015](0015-engine-snapshots.md) | Engine snapshots: complete state at step boundaries, versioned JSON, untrusted-input validation | Accepted (CP3) |
 | [0016](0016-keyframes-and-trace-regeneration.md) | Keyframes every K steps; seeking; trace regeneration with absolute indices | Accepted (CP3) |
 | [0017](0017-trace-index-package.md) | `@faultlab/trace`: read-only, checkpointed TraceIndex (K entries) | Accepted (CP3) |
+| [0018](0018-raft-election-model.md) | `@faultlab/protocols`: Raft election per Figure 2; five historical invariants from real events; broken variants | Accepted (CP4) |
+| [0019](0019-bounded-liveness.md) | Bounded, conditional liveness checks with real deadline events; never safety | Accepted (CP4) |
+| [0020](0020-comparison-and-counterexamples.md) | Naive-vs-Raft comparison under identical external conditions; counterexample format 2 | Accepted (CP4) |

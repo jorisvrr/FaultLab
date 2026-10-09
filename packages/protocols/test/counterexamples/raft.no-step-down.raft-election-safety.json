@@ -1,0 +1,86 @@
+{
+  "format": "faultlab-counterexample/2",
+  "description": "raft-election/bug:no-step-down: a leader that meets a higher term adopts it but keeps leading, next to the leader elected in that term (found by fault exploration)",
+  "engineVersion": "0.4.0-cp4",
+  "protocol": {
+    "name": "raft-election/bug:no-step-down",
+    "version": "1",
+    "variant": "no-step-down",
+    "options": {}
+  },
+  "invariant": {
+    "id": "raft-election-safety",
+    "version": "1"
+  },
+  "config": {
+    "seed": 162726398,
+    "nodes": [
+      "n1",
+      "n2",
+      "n3",
+      "n4",
+      "n5"
+    ],
+    "latency": {
+      "min": 1,
+      "max": 25
+    },
+    "maxTime": 2500,
+    "faults": [
+      {
+        "at": 369,
+        "type": "partition",
+        "groups": [
+          [
+            "n1",
+            "n3",
+            "n4",
+            "n5"
+          ],
+          [
+            "n2"
+          ]
+        ]
+      },
+      {
+        "at": 0,
+        "type": "partition",
+        "groups": [
+          [
+            "n3",
+            "n4",
+            "n5"
+          ],
+          [
+            "n1",
+            "n2"
+          ]
+        ]
+      }
+    ]
+  },
+  "discovery": {
+    "fastCheckSeed": 4242,
+    "runsUntilFailure": 25,
+    "originalFaultCount": 2,
+    "shrinkSteps": 18,
+    "removedByMinimiser": 0,
+    "minimisedFaultCount": 2
+  },
+  "expected": {
+    "reason": "invariant-violation",
+    "violationTime": 436,
+    "nodes": [
+      "n4",
+      "n1"
+    ],
+    "observed": "Term 2 was led by n4 and also by n1",
+    "eventNumber": 41,
+    "fingerprint": "ee240095"
+  },
+  "correctProtocol": {
+    "reason": "time-limit",
+    "violations": 0,
+    "fingerprint": "e2f70f12"
+  }
+}

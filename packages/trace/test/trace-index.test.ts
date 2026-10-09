@@ -279,3 +279,44 @@ describe('remaining API', () => {
     expect(() => TraceIndex.build(trace, { checkpointEntries: 0 })).toThrow(RangeError);
   });
 });
+
+describe('bounded-liveness entries (CP4)', () => {
+  // A leader must exist within 30 ticks while n1 runs: missed at t=30, met late, disarmed when n1 crashes.
+  const leaderExists = {
+    id: 'leader-exists',
+    version: '1',
+    name: 'some running node is leader',
+    deadline: 30,
+    assumptions: ['n1 is running'],
+    assumptionsHold: (view: { node(id: string): { status: string } }) => view.node('n1').status === 'running',
+    progress: (view: { nodes: readonly { status: string; state: unknown }[] }) => view.nodes.some((n) => n.status === 'running' && (n.state as { role?: string } | undefined)?.role === 'leader'),
+  };
+  const config: SimulationConfig = { ...configFor('leader', 7, [{ at: 300, type: 'crash', node: 'n1' }]), liveness: [leaderExists as never] };
+
+  it('reconstructs the liveness phase after every step exactly as the engine holds it', () => {
+    const sim = new Simulation(config);
+    const phases: { index: number; phase: unknown; since: unknown }[] = [];
+    while (sim.stopReason === null) {
+      sim.step();
+      const check = sim.snapshot().liveness!.checks[0]!;
+      phases.push({ index: sim.traceLength - 1, phase: check.phase, since: check.since });
+    }
+    const index = TraceIndex.build(sim.trace, { checkpointEntries: 16 });
+    for (const { index: i, phase, since } of phases) expect(index.frameAt(i).liveness).toMatchObject([{ id: 'leader-exists', phase, since }]);
+    expect(new Set(phases.map((p) => p.phase))).toEqual(new Set(['waiting', 'missed', 'met', 'idle']));
+  });
+
+  it('treats liveness.missed as a step trigger and marks missed / met entries exactly', () => {
+    const trace = runSimulation(config).trace;
+    const index = TraceIndex.build(trace);
+    const missed = trace.find((e) => e.kind === 'liveness.missed')!;
+    expect(missed.time).toBe(30);
+    expect(index.step(index.stepOf(missed.index)!).first).toBe(missed.index);
+    const markers = index.markers.filter((m) => m.kind === 'liveness-missed' || m.kind === 'liveness-met');
+    expect(markers.map((m) => [m.kind, trace[m.index]!.kind])).toEqual([['liveness-missed', 'liveness.missed'], ['liveness-met', 'liveness.met']]);
+    expect(markers[1]!.label).toContain('(late)');
+    expect(index.frameAt(missed.index).liveness[0]).toMatchObject({ phase: 'missed', deadlineAt: 30 });
+    const disarmed = trace.find((e) => e.kind === 'liveness.disarmed')!;
+    expect(index.frameAt(disarmed.index).liveness[0]).toEqual({ id: 'leader-exists', phase: 'idle', since: null, deadlineAt: null });
+  });
+});

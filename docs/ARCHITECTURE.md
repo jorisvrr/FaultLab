@@ -24,7 +24,7 @@
 └────────┼──────────────────────────────────────────────────────────────────┘
          │ plain function calls
 ┌────────▼──────────────────────────────────────────────────────────────────┐
-│ packages/engine  (CP3 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
+│ packages/engine  (CP4 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
 │                                                                           │
 │   Simulation ──► EventScheduler ──► BinaryHeap        VirtualClock        │
 │      │   │       (time, seq) order; compaction                            │
@@ -41,7 +41,13 @@
 │                                                                           │
 │      ├──► snapshot() / restore() (step boundaries, validated JSON)        │
 │      └──► TimeTravel: keyframes every K steps, seek, regenerate segments  │
-│   later: bounded liveness (CP4)                                           │
+│      └──► bounded liveness (CP4): checks after invariants, real deadline  │
+│            events in the scheduler, liveness.* entries (never safety)     │
+├───────────────────────────────────────────────────────────────────────────┤
+│ packages/protocols (CP4 ✅) @faultlab/protocols — engine TYPES only       │
+│   Raft election (Figure 2) + 6 broken variants · 5 historical Raft        │
+│   invariants · raftLeaderLiveness (healthy-group assumption, D = test     │
+│   bound) — plain Protocol / Invariant / LivenessCheck values              │
 ├───────────────────────────────────────────────────────────────────────────┤
 │ packages/trace   (CP3 ✅)   @faultlab/trace — engine TYPES only, no deps  │
 │   TraceIndex: checkpoints every C entries, frames, steps, markers, causes │
@@ -108,7 +114,8 @@ step():
 
 | Concern | Where | Knows about |
 |---|---|---|
-| Simulation execution | `Simulation.step()` | config, protocol, faults, invariants |
+| Simulation execution | `Simulation.step()` | config, protocol, faults, invariants, liveness checks |
+| Protocols and their checks (CP4) | `@faultlab/protocols` | engine **types** only; runs inside the engine's step |
 | Engine snapshots and time travel | `snapshot.ts`, `time-travel.ts` | execution state at **step boundaries** |
 | Trace reconstruction | `@faultlab/trace` (`TraceIndex`) | a completed trace only; any **entry** |
 | Frontend rendering | `apps/demo` (later `apps/web`) | TraceIndex frames; never engine internals |
@@ -121,7 +128,7 @@ A throwaway check that the engine works outside tests. Since CP3 its `derive.ts`
 
 - **Worker protocol (CP5).** Versioned discriminated-union messages in both directions, validated on receipt. The worker streams trace entries in chunks; the UI keeps an index of them. The worker never receives UI state.
 - **Experiment format (CP7).** `{ formatVersion, engineVersion, protocol: {name, version}, config }`, where the config already contains the fault plan. Traces are *not* the shared artefact; inputs are. A trace is re-derived and its fingerprint compared with the stored one to detect engine/protocol drift.
-- **Protocol view adapters (CP4+).** A protocol may export a pure `describe(state) → { role, term, label }` used only by the UI, keeping visual concerns out of the engine and out of protocol logic.
+- **Protocol view adapters (CP5+).** A protocol may export a pure `describe(state) → { role, term, label }` used only by the UI, keeping visual concerns out of the engine and out of protocol logic. CP4's comparison harness already uses the minimal form of this ("is this node leader, in which term?") for both protocols; the Raft data a UI needs is listed in [UI_REQUIREMENTS](UI_REQUIREMENTS.md#raft-visualisation-data-cp4--cp5cp6).
 - **User-supplied protocols (CP10).** Requires its own security architecture ADR (sandboxing, resource limits, determinism guards). Not before.
 
 ## 6. Architecture decision records

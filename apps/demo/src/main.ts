@@ -57,12 +57,13 @@ function verify(): void {
   const lines = [`re-executed 2× from the same inputs: traces ${identical ? 'byte-identical ✓' : 'DIFFER ✗'}`, `fingerprint ${run.fingerprint}`];
   const expected = run.experiment.expected;
   if (expected !== undefined) {
-    const match = expected.fingerprint === run.fingerprint;
-    lines.push(`stored fixture fingerprint ${expected.fingerprint}: ${match ? 'matches ✓' : 'MISMATCH ✗'}`);
+    const fixtureFormat = run.experiment.fingerprintOf?.(run.model.trace) ?? run.fingerprint;
+    const match = expected.fingerprint === fixtureFormat;
+    lines.push(`stored fixture fingerprint ${expected.fingerprint}: ${match ? 'matches ✓' : 'MISMATCH ✗'}${fixtureFormat === run.fingerprint ? '' : ' (via legacy trace projection)'}`);
   }
   const el = $('verify-result');
   el.textContent = lines.join('\n');
-  el.className = `verify mono ${identical && (expected === undefined || expected.fingerprint === run.fingerprint) ? 'ok' : 'fail'}`;
+  el.className = `verify mono ${identical && (expected === undefined || expected.fingerprint === (run.experiment.fingerprintOf?.(run.model.trace) ?? run.fingerprint)) ? 'ok' : 'fail'}`;
   el.dataset['identical'] = String(identical);
 }
 
@@ -360,6 +361,16 @@ function describeEntry(e: TraceEntry): string {
       return `${e.invariant.id}: ${e.error}`;
     case 'protocol.error':
       return `${e.node}: ${e.error}`;
+    case 'liveness.armed':
+      return `${e.check.id}: progress expected by t=${e.deadlineAt}`;
+    case 'liveness.met':
+      return `${e.check.id}: progress after ${e.duration} ticks${e.late ? ' (late)' : ''}`;
+    case 'liveness.missed':
+      return `${e.check.id}: no progress by t=${e.deadlineAt}`;
+    case 'liveness.disarmed':
+      return `${e.check.id}: assumptions no longer hold`;
+    case 'liveness.error':
+      return `${e.check.id}: ${e.error}`;
     case 'run.end':
       return `${e.reason} after ${e.eventsProcessed} events`;
   }
