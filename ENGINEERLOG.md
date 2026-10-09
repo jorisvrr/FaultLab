@@ -2039,3 +2039,180 @@ React mag nooit bepalen wát er gebeurt, alleen hoe het eruitziet. De UI beïnvl
 - PERF-5 is verzacht, niet opgelost: bij honderden termen groeit de kostprijs per stap nog.
 - De integriteitscontrole van de ontvangen trace volgt ná de run; tijdens de run garanderen volgorde- en bereikcontroles de volledigheid.
 - Het CP2.5-prototype (`apps/demo`) bestaat nog en is niet aangepast, behalve de versiecompatibiliteit uit CP4.
+
+## CP6 — Ontwerp naar applicatie
+
+### CP6.0 — Fase 0: eerst kijken, dan bouwen
+
+**1. Wat hebben we gedaan?**
+De drie goedgekeurde ontwerpen (Configure, Simulate, Investigate) zijn opgemeten: posities, kleuren, lettertypes en materialen. Daarnaast staat er een inventaris van wat al werkt sinds CP5, wat nieuw moet, welke toestanden de ontwerpen niet tonen en welke pagina's de specificatie noemt. Alles staat in `docs/CP6_DESIGN_AUDIT.md`. In ADR-0025 staat de beslissing om 3D-knopen (Three.js / React Three Fiber) toch in het kerninstrument te gebruiken, met voorwaarden.
+
+**2. Waarom is dit nodig?**
+Een ontwerp bevat voorbeelddata. Zonder inventaris bouw je die voorbeelddata na in plaats van de echte. Een voorbeeld: "ALL INVARIANTS SATISFIED" belooft meer dan een simulatie kan bewijzen. Een ander voorbeeld: in de inspector staat `currentTerm` onder "volatile", terwijl Raft die waarde duurzaam opslaat.
+
+**3. Wat vonden we?**
+- ✅ **De "WebKit-staart" is geen WebKit-probleem.** Gecontroleerd gemeten blijkt het streamen zelf in alle browsers vloeiend (maximaal 25 ms per beeld). De lange beelden komen van Investigate. Die toont bij "live volgen" de volledige oorzakenketen van de nieuwste entry, en bij Raft-heartbeats groeit die keten mee met de run: 8 001 voorgangers bij entry 123 930. Chromium vertraagt ook (tot 94 ms); WebKit blokkeert één keer ongeveer 44 seconden. De CP5-test zag dit niet, omdat hij maar één beeld lang in Investigate bleef.
+- ✅ **Een tweede fout:** het vinkje "live volgen" springt na een klik even terug. Een gecontroleerd React-veld wacht niet op de melding van de `Session`, want die komt pas bij het volgende beeld.
+- De ontwerpen gebruiken amber voor storingen, niet het eerder gekozen rood-oranje. Dat staat als open vraag (Q1).
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "het is traag in Safari" een hypothese en geen diagnose, en hoe heb ik de oorzaak geïsoleerd?
+2. Waarom moeten meldingen van gebruikersinvoer meteen komen, terwijl meldingen van de Worker mogen wachten tot het volgende beeld?
+3. Waarom mag de 3D-weergave nooit bepalen hoe snel of wat er gesimuleerd wordt?
+
+### CP6.1 — Twee fouten repareren voordat we mooi gaan doen
+
+**1. Wat hebben we gedaan?**
+De twee fouten uit fase 0 zijn verholpen. Investigate toont de oorzakenketen nu in een venster: alleen de zichtbare regels staan in de pagina. De lijst zelf wordt niet ingekort; het aantal staat erbij, je kunt scrollen en met één klik naar de eerste oorzaak of naar de wortel (`run.start`) springen. En de `Session` meldt veranderingen van de gebruiker meteen, terwijl gegevens van de Worker gebundeld blijven tot het volgende beeld.
+
+**2. Waarom is dit nodig?**
+Een bevroren venster van 8,9 seconden tijdens gewoon rondkijken is geen traagheid meer, dat is kapot. En een vinkje dat terugspringt leert de gebruiker dat hij de applicatie niet kan vertrouwen.
+
+**3. Hoe werkt het?**
+- ✅ **Het lag niet aan Safari.** Een kleine meting laat zien waarom het daar het eerst misging: vijf regels vooraan een bestaande lijst van 8 000 zetten kost in een `<ol>` 191 ms in Chromium, 160 ms in Firefox en 334 ms in WebKit. Een `<ol>` hernummert bij elke wijziging al zijn items; een `<ul>` doet dat niet en kost in Chromium 8 ms. Alle browsers liepen vast, WebKit alleen het hardst.
+- ✅ **De berekening was nooit het probleem.** De keten van 8 001 voorgangers opzoeken kost 0,20 ms. Het tekenen van 8 001 regels kostte alles. Ik heb eerst gemeten en daarna pas iets veranderd.
+- De regressietest blijft de hele run in Investigate staan, zet "live volgen" uit en weer aan, klikt naar een eerdere gebeurtenis en speelt daarna het diepste stuk van de trace af, zodat de keten van ~8 000 echt getoond wordt. Beide tests zijn eerst tegen de oude code gedraaid: ze faalden.
+- Het langste geblokkeerde moment ging van 508 ms (WebKit) naar 13 ms; het langste beeld van 8 853 ms naar 20 ms.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is een `<ol>` duurder dan een `<ul>`, en wat zegt dat over "het ligt aan de browser"?
+2. Waarom mag een venster-lijst geen gegevens weglaten, en hoe blijft de hele keten bereikbaar?
+3. Waarom moeten meldingen van de gebruiker meteen komen en die van de Worker niet?
+
+### CP6.2 — Eén bol, maar dan precies die bol
+
+**1. Wat hebben we gebouwd?**
+Een prototype (`node-lab.html`) met de gebeeldhouwde knoop in Three.js en React Three Fiber: één WebGL-context, twee tekenopdrachten, ongeacht het aantal knopen. Daarnaast een statenblad met alle toestanden (leider, kandidaat, gecrasht, afgesneden, herstellend, geselecteerd, zweven) en hun combinaties, en een terugvalweergave zonder WebGL.
+
+**2. Waarom is dit nodig?**
+Als deze bol het hart van de hele interface wordt, moet eerst vaststaan dat hij er goed uitziet, snel is, herbruikbaar is en toegankelijk blijft. Pas daarna mag hij overal verschijnen.
+
+**3. Hoe werkt het?**
+- De bol is een echte bol (één gedeelde geometrie); alles wát op en rond de rand gebeurt — de lichtrand, de gloed, de ringen — wordt analytisch in een schild ervoor getekend. Daardoor blijven lijnen scherp bij elke grootte.
+- ✅ **Gemeten in plaats van gegokt.** Middelpunten en stralen zijn met een cirkelfit uit de PNG's gehaald, en de helderheid van de rand is per hoek opgemeten (linksboven 1,0, rechtsboven 0,52). Het gemiddelde verschil met de referentie is 7,4 van 255 voor de grote bol.
+- Toestanden verschillen in vórm, niet alleen in kleur: gecrasht is een gebroken rand, afgesneden een stippellijn, kandidaat een onderbroken rand. Ze zitten in losse kanalen, zodat "leider én geselecteerd" geen conflict geeft.
+- Elke knoop heeft een echte knop in de DOM met een naam, dus toetsenbord en schermlezer werken in alle drie de weergaven.
+- Kosten: 0,3–1 ms processortijd per beeld bij 20 knopen, 1,2–2,2 ms op de grafische kaart, en nul beelden als er niets verandert.
+- ⚠️ **De prijs:** het 3D-bestand is 244 kB ingepakt. Dat wil ik kleiner maken voordat dit in de applicatie zelf komt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom tekenen we de rand en de ringen in een schild ervoor, in plaats van in de bol zelf?
+2. Waarom mag een toestand nooit alleen met kleur worden aangegeven?
+3. Waarom blijft het aantal tekenopdrachten twee, of er nu één of twintig knopen staan?
+4. Wat betekent "op aanvraag tekenen", en waarom is dat belangrijk voor een simulator?
+
+### CP6.3 — Waarom de bol plat leek: de normaal, niet de spiegeling
+
+**1. Wat was er mis?**
+De eerste versie van de knoop zag eruit als een donkere schijf met een lichtrand eromheen. De referentie is een massief voorwerp met een brede weerspiegeling over de hele linkerbovenkant. Mijn licht zat alleen op de rand.
+
+**2. Waarom gebeurde dat?**
+Ik berekende de weerspiegeling met de *spiegelrichting* (`reflect`). Op een bol verdubbelt dat de hoeksnelheid: het verlichte gebied krimpt tot een sikkel tegen de rand. De referentie volgt de **normaal** van het oppervlak. Dat is geen detail maar het verschil tussen plat en rond.
+
+**3. Hoe heb ik het gevonden?**
+✅ **Meten in plaats van schuiven aan knoppen.** Ik heb van alle zes referentieknopen de binnenkant uitgelezen (ongeveer 80 000 punten per bol) en met kleinste kwadraten een model gepast:
+helderheid = basis + A · exp(k · (n·L − 1)) · (1 + F · (1 − n·V)^p).
+Alle zes gaven dezelfde lichtrichting (−0,61 / 0,67 / −0,40) en vergelijkbare vormparameters. De amplitude A verschilde per knoop — en dat bleek betekenis te hebben: de knoop die je inspecteert is in het ontwerp lichter, de andere donkerder.
+
+**4. Nog twee lessen**
+- ✅ **Dubbeltellen.** Ik telde de randgloed óók op bij de verlichte kant, terwijl het gepaste model die kant al volledig beschrijft. Daardoor brandde de rand uit naar wit. De gloed vult nu alleen de onverlichte kant aan.
+- ✅ **Warm licht komt van de rand.** Het verschil rood-min-blauw is bovenaan +36, maar in de richting van het hoofdlicht juist licht koel (−9). De warmte is dus geen eigenschap van het hoofdlicht maar van de lichtrand die het oppervlak ernaast aanstraalt. Het is een kleurverschuiving zonder extra helderheid, dus een tint, geen extra lamp.
+- ✅ **Aders als richels, niet als strepen.** Eerst tekende ik de aders als donkere lijnen: dat leest als scheuren. Nu buigt de normaal langs de flanken van de ader, zodat het licht de richel zélf vangt. De breedte zakt nooit onder twee beeldpunten (`fwidth`), anders fonkelt het.
+- ⚠️ **De prijs:** de grafische kaart ging van 1,4 naar 4,3 ms bij twintig knopen. Binnen de begroting van 8 ms, en de zuinige weergave is onveranderd.
+
+**5. Over meten**
+⚠️ **Het gemiddelde verschil is een slechte scheidsrechter.** Een bol is grotendeels donker, dus een gemiddelde blijft laag terwijl precies het belangrijkste — de weerspiegeling — fout is. Voor Simulate en Configure ging het gemiddelde zelfs iets omhoog terwijl het resultaat duidelijk beter werd. Ik heb daarom per gebied gemeten: de helling van het licht, de kleur per hoek, het contrast van de textuur, en het blauwe veld om een geselecteerde knoop.
+
+**6. Wat ik heb afgewezen**
+- Een ingebakken textuur: de knopen worden van 29 tot 95 beeldpunten getekend, dus één plaatje wordt óf wazig óf korrelig; het kost bovendien een bestand en geheugen in elke weergave.
+- Volledige schermgloed (bloom): eerst gemeten. Het verre veld rond de grote bol komt tot op 2 van 255 overeen met de referentie. Een extra schermbewerking zou dus niets opleveren.
+- Een smallere lichtval voor kleine bollen: hielp de kleine knoop een beetje en maakte de middelgrote duidelijk slechter. Afgevoerd.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom geeft rekenen met de spiegelrichting een smallere lichtvlek dan rekenen met de normaal?
+2. Wat betekent "dubbeltellen" hier, en waarom zag je dat pas aan een uitgebrande rand?
+3. Waarom is een gemiddeld pixelverschil een misleidende maat voor een grotendeels donker voorwerp?
+4. Waarom buigen we de normaal voor een ader in plaats van de ader donkerder te maken?
+
+### CP6.4 — De kleine bollen: waar het gemiddelde loog
+
+**1. Wat ging er mis?**
+Na alle metingen aan de grote bol leken de kleine knopen in de zijbalk van Investigate goed volgens het cijfer: een gemiddeld verschil van 11,8 — beter dan de versie die ik er daarna van maakte. Toen ik ze naast elkaar op ware grootte zette, bleek het tegendeel: de referentie is helder zilverachtig, de mijne was donker en oranje.
+
+**2. Waarom loog het cijfer?**
+Het gemiddelde verschil over een gebied wordt gedomineerd door de smalle randzone, waar een halve beeldpunt verschuiving al grote waarden geeft. Het lichaam van een kleine bol beslaat weinig beeldpunten, dus een forse fout dáár verdwijnt in het gemiddelde. Gemeten in de lichte band: de referentie haalt 179, ik haalde 107. Na correctie: 173 — maar het "cijfer" ging omhoog naar 13,3.
+
+**3. Wat was de echte oorzaak?**
+Een kleine bol heeft in de referentie een stéilere lichtval naar de rand toe dan een grote. Dat zit in de term die het licht bij scherende invalshoek versterkt, niet in de breedte van de lichtvlek. ⚠️ Mijn eerste poging was precies andersom: ik maakte de lichtvlek smaller. Dat maakte de kleine knoop drie keer te donker (52 in plaats van 179) en de middelgrote knopen ook slechter. Teruggedraaid.
+
+**4. En de kleur?**
+De kleine knopen zijn in de referentie vrijwel neutraal (+1 tot +4 rood-min-blauw), terwijl de grote bol bovenaan +36 is. Ik had ze allemaal op "warm" staan.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan een gemiddeld verschil over een gebied beter worden terwijl het beeld slechter wordt?
+2. Wat is het verschil tussen "de lichtvlek smaller maken" en "het licht bij scherende invalshoek versterken"?
+3. Waarom is naast elkaar kijken op ware grootte een noodzakelijke controle, en geen luxe?
+
+### CP6.5 — De laatste slijpslag: vorm in plaats van sterkte
+
+**1. Wat was de opdracht?**
+Het oppervlak oogde nog te ruw, "als donkere steen in plaats van gepolijst glas". De vraag was om de aders ongeveer 25 tot 35 procent zwakker te maken.
+
+**2. Wat bleek?**
+✅ **Ik heb het eerst letterlijk gedaan** en gemeten: het contrast van de textuur ging van 25,9 naar 18,6. Het hielp niet. Het oppervlak bleef als steen lezen. De oorzaak zat niet in de *sterkte* maar in de *vorm*: mijn richels waren brede, zachte bulten, terwijl die van de referentie dunne, scherpe gegraveerde lijnen zijn. Na het versmallen van de aderdoorsnede leest het wél als gepolijst materiaal, bij een contrast van 24,0.
+⚠️ **En de referentie is juist sterker getextureerd dan mijn versie** (25,9 tegen 24,0). Verder verzwakken loopt dus wég van het origineel. Ik heb de gevraagde verzwakking daarom niet doorgevoerd en dat met cijfers onderbouwd in plaats van stilletjes de instructie te volgen.
+
+**3. Nog twee keer de verkeerde kant op**
+- ⚠️ **"De lichtvlek moet verder naar binnen."** Mijn eerste poging maakte hem overal helderder dan de referentie. Toen ik de hoekverdeling opmat, bleek de referentie juist *geconcentreerder* dan mijn versie. Teruggedraaid. Het echte probleem was de **uitgebrande piek**: mijn afvlakking had geen plafond, dus lichaam plus de naar binnen uitlopende rand liepen vast op 253, waar de referentie op 242 zit. Nu een zachte begrenzing met een vast plafond.
+- ⚠️ **Kleine knopen smaller belichten** gaf een betere hoekvorm én een beter gemiddeld verschil, maar kostte precies wat gevraagd was: bereik over het oppervlak. Afgewezen op het doel, niet op het cijfer.
+
+**4. Over meten, nog een keer**
+⚠️ De grafische meting via de tijdklok van de videokaart is op een laptop onbetrouwbaar in de staart: één meting van één knoop in de zuinige weergave gaf 4,78 ms p95. Ik rapporteerde eerder 3 ms extra kosten op basis van zo'n staartwaarde. **Dat was fout.** De mediaan over drie metingen zegt ongeveer 1 ms extra bij twintig knopen. Gecorrigeerd in de documentatie.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom verandert het versmallen van een ader de waarneming meer dan het verzwakken ervan?
+2. Waarom heb ik een expliciete instructie niet uitgevoerd, en hoe onderbouw ik dat?
+3. Wat is het verschil tussen een afvlakking zonder plafond en een zachte begrenzing mét plafond, en hoe zag je dat terug in de meting?
+4. Waarom is de mediaan hier een eerlijker maat dan het 95e percentiel?
+
+### CP6.6 — Een wankele test ontdekt (en niet stilletjes aangepast)
+
+**1. Wat gebeurde er?**
+Tijdens de eindcontrole faalde de geheugentest uit CP5 in twee van de vijf volledige testruns: "groei na drie afgesloten runs" van 16 tot 20 MB, tegen een grens van 10 MB.
+
+**2. Is het een lek?**
+Nee. De reeks metingen is 32,7 → 46,9 → 50,6 → 49,1. Vanaf de tweede meting ligt het geheugen stil rond 50 MB. De test vergelijkt echter de laatste meting met de **eerste**, en die wordt genomen terwijl de pagina nog koud is. Wat er gemeten wordt is dus opwarming (code die pas tijdens het draaien wordt vertaald, de Worker die wordt geladen), niet groei. Begint de eerste meting toevallig warm (51 MB), dan rapporteert dezelfde test 1,8 MB.
+
+**3. Is het mijn schuld?**
+Nee, en dat heb ik gecontroleerd in plaats van aangenomen: met de ingecheckte CP5-versie van `session.ts` gedraagt het zich precies hetzelfde. Bovendien draait deze test op de meetpagina, die de 3D-weergave nooit laadt.
+
+**4. Waarom heb ik het niet gerepareerd?**
+⚠️ Omdat een test aanpassen die faalt verdacht dicht bij "de test zwakker maken" ligt. De juiste reparatie is de vergelijking veranderen (laatste twee metingen in plaats van koude start tot eind), niet de grens. Dat is een beslissing van de begeleider, niet van mij. Ik heb het gemeten, onderbouwd en voorgelegd.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "het geheugen groeide van 33 naar 50 MB" hier géén bewijs van een lek?
+2. Wat is het verschil tussen een test repareren en een test zwakker maken?
+3. Waarom controleerde ik eerst of mijn eigen wijziging de oorzaak was?
+
+### CP6.7 — De geheugentest repareren zonder hem te verzwakken
+
+**1. Het probleem**
+De CP5-geheugentest vergeleek het geheugen ná drie runs met een meting die *vóór* de eerste run werd genomen, dus op een koude pagina. Dat verschil bestaat vooral uit opwarming: code die V8 pas bij de eerste uitvoering vertaalt, en de Worker-module die geladen wordt. De uitslag hing daardoor alleen af van hoe koud die eerste meting toevallig was: drie keer dezelfde code gaf 16,4 — 19,8 — 1,8 MB "groei".
+
+**2. De reparatie**
+Twee runs vooraf om op te warmen (metingen weggegooid), dan vijf gemeten runs. De groei is nu de **helling van een kleinste-kwadratenlijn** door die vijf punten, niet het verschil tussen twee uiteinden. Daarnaast een grens op de spreiding van de hele reeks, en een telling die bewijst dat elke run zijn Worker heeft afgesloten (7 gemaakt, 0 blijven hangen). De tolerantie van 10 MB is ongewijzigd.
+
+**3. Nog een echte vondst**
+✅ **Eén keer `gc()` aanroepen is niet genoeg.** Objecten die via finalisatie vrijkomen — een beëindigde Worker hoort daarbij — hebben een ronde van de gebeurtenislus en een tweede opruiming nodig. Dát verklaarde de laatste uitschieter van 5 MB. De meting ruimt nu drie keer op met 25 ms ertussen. Daarna: negen metingen achter elkaar, groei 0 MB en spreiding hooguit 0,1 MB.
+
+**4. Hoe weet ik dat de test nog iets kan vinden?**
+⚠️ **Een test die niet kan falen is waardeloos.** Daarom zit er een foutinjectie in: met `retain: true` houdt elke afgesloten run expres zijn Session vast. De reeks wordt dan 47 → 69 → 91 → 104 → 126 MB, oftewel 19 à 20 MB per run. De test eist dat de controle daar faalt. Zo weet ik dat "groen" ook echt iets betekent.
+
+**5. Conclusie**
+Er was nooit een lek. Het geheugen loopt na het opwarmen vlak op ongeveer 47,5 MB. De oude test mat opwarming en noemde dat groei.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is de helling door vijf punten eerlijker dan het verschil tussen de eerste en de laatste?
+2. Waarom kan één keer opruimen te weinig zijn, en wat heeft een Worker daarmee te maken?
+3. Wat is foutinjectie, en waarom is het nodig bij een test die anders altijd groen is?
+4. Wat is het verschil tussen een test repareren en een test zwakker maken — en aan welke kant valt deze wijziging?

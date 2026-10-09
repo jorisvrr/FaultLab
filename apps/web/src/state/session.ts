@@ -10,6 +10,11 @@ import { TraceStore } from './trace-store';
  * The UI influences a simulation ONLY by loading a spec and sending run commands. The cursor,
  * follow mode, selection and replay speed are UI state and never reach the Worker.
  */
+/** Who caused a change: the user (notify now) or data arriving (coalesce per frame). */
+type Source = 'user' | 'data';
+const USER: Source = 'user';
+const DATA: Source = 'data';
+
 export interface ExperimentMeta {
   readonly id: string;
   readonly title: string;
@@ -79,7 +84,7 @@ export class Session {
 
   load(spec: ExperimentSpec, experiment: ExperimentMeta, runOptions?: Partial<RunOptions>): void {
     this.#stopReplay();
-    this.#set({ experiment, spec, cursor: 0, follow: true, selectedNode: null });
+    this.#set({ experiment, spec, cursor: 0, follow: true, selectedNode: null }, USER);
     this.client.load(spec, runOptions);
   }
 
@@ -99,11 +104,11 @@ export class Session {
 
   setCursor(index: number): void {
     const last = Math.max(0, this.trace.length - 1);
-    this.#set({ cursor: Math.max(0, Math.min(last, Math.round(index))), follow: false });
+    this.#set({ cursor: Math.max(0, Math.min(last, Math.round(index))), follow: false }, USER);
   }
 
   setFollow(follow: boolean): void {
-    this.#set({ follow, cursor: follow ? Math.max(0, this.trace.length - 1) : this.#view.cursor });
+    this.#set({ follow, cursor: follow ? Math.max(0, this.trace.length - 1) : this.#view.cursor }, USER);
   }
 
   /** Move by trace entries (±1 …). */
@@ -129,14 +134,13 @@ export class Session {
   }
 
   selectNode(id: string | null): void {
-    this.#set({ selectedNode: id });
+    this.#set({ selectedNode: id }, USER);
   }
 
   /** Replay the RECEIVED trace from the cursor at `entriesPerSecond`. Never re-runs the engine. */
   replay(entriesPerSecond = this.#view.replaySpeed): void {
     this.#stopReplay();
-    if (this.#view.cursor >= this.trace.length - 1) this.#set({ cursor: 0 });
-    this.#set({ replaying: true, follow: false, replaySpeed: entriesPerSecond });
+    this.#set({ replaying: true, follow: false, replaySpeed: entriesPerSecond, ...(this.#view.cursor >= this.trace.length - 1 ? { cursor: 0 } : {}) }, USER);
     const tickMs = 50;
     this.#replayTimer = setInterval(() => {
       const next = this.#view.cursor + Math.max(1, Math.round((entriesPerSecond * tickMs) / 1000));
@@ -148,7 +152,7 @@ export class Session {
   }
 
   stopReplay(): void {
-    this.#stopReplay();
+    this.#stopReplay(USER);
   }
 
   /** Protocol-specific summary of a node's state (registry view adapter; display only). */
@@ -164,10 +168,10 @@ export class Session {
     this.#listeners.clear();
   }
 
-  #stopReplay(): void {
+  #stopReplay(source: Source = DATA): void {
     if (this.#replayTimer !== null) clearInterval(this.#replayTimer);
     this.#replayTimer = null;
-    if (this.#view?.replaying) this.#set({ replaying: false });
+    if (this.#view?.replaying) this.#set({ replaying: false }, source);
   }
 
   #changed(): void {
@@ -175,17 +179,28 @@ export class Session {
     this.#set({ run: this.client.view, length, traceVersion: this.trace.version, ...(this.#view.follow ? { cursor: Math.max(0, length - 1) } : {}) });
   }
 
-  #set(patch: Partial<SessionView>): void {
+  /**
+   * USER changes (a click, a key) notify at once: a controlled input (the "follow live"
+   * checkbox, the cursor slider) must show the new value in the same event, or React restores
+   * the old one for a frame (CP6 Phase 0 bug). DATA changes (Worker chunks, replay ticks) are
+   * coalesced to at most one notification per frame, so a fast Worker cannot flood React.
+   */
+  #set(patch: Partial<SessionView>, source: Source = DATA): void {
     const next = { ...this.#view, ...patch };
     if (patch.run === undefined) next.run = this.client.view;
     next.length = this.trace.length;
     next.traceVersion = this.trace.version;
     this.#view = Object.freeze(next);
+    if (source === USER) return this.#notify();
     if (this.#notifyScheduled) return;
     this.#notifyScheduled = true;
     this.#schedule(() => {
       this.#notifyScheduled = false;
-      for (const listener of [...this.#listeners]) listener();
+      this.#notify();
     });
+  }
+
+  #notify(): void {
+    for (const listener of [...this.#listeners]) listener();
   }
 }

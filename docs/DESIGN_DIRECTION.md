@@ -201,6 +201,8 @@ Implementation: CSS `cursor: url(cursor.svg) x y, auto` (rendered by the OS: zer
 
 ## 10. Rendering approaches and trade-offs
 
+> **Superseded in part (CP6):** the "not for the core instrument" verdict on Three.js / React Three Fiber below, and phase V7 in §13, are superseded by [ADR-0025](adr/0025-sculptural-3d-in-the-core-instrument.md). The approved CP6 designs use sculptural 3D nodes in every mode, under the conditions recorded there. The rest of this section still applies.
+
 | Approach | Strengths | Weaknesses | Fit |
 |---|---|---|---|
 | **SVG (React-rendered)** | Crisp, styleable, inspectable, focusable, accessible; trivial hit-testing | DOM cost grows with element count; per-frame updates of hundreds of signals get expensive | **Phase 1 graph** (≤ ~50 nodes, a few hundred signals). Prove the visual language cheaply |

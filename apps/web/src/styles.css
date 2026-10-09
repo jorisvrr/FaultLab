@@ -137,3 +137,29 @@ pre {
 .hint {
   opacity: 0.75;
 }
+/* CP6 Phase 0 fix: windowed lists (only the rows in view are in the DOM). */
+.windowed {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+.windowed > ol {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.windowed li {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 24px;
+}
+.windowed-empty {
+  list-style: none;
+  padding: 0;
+}

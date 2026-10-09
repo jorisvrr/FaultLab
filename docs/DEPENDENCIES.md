@@ -33,6 +33,18 @@ No runtime dependencies. It imports only TypeScript **types** from `@faultlab/en
 
 Deliberately **not** added: `@vitejs/plugin-react` (Vite 8 compiles TSX itself; no fast refresh needed), a router (three hash-routed modes), a state library (one external store with `useSyncExternalStore`), a schema library (hand-written validation of a small contract), Comlink (we need to see and test the messages), jsdom/testing-library (UI behaviour is tested in real browsers; logic lives in framework-free stores tested in Node). `@faultlab/experiments` and `@faultlab/runtime` have only workspace dependencies.
 
+## CP6 (`apps/web`)
+
+| Package | Version | License | Where | Why |
+|---|---|---|---|---|
+| `three` | 0.186.1 (exact) | MIT | `apps/web` (dependency) | Sculptural nodes in the core instrument ([ADR-0025](adr/0025-sculptural-3d-in-the-core-instrument.md)). Lazy-loaded in its own chunk; pages without a stage never download it |
+| `@react-three/fiber` | 9.8.1 (exact) | MIT | `apps/web` (dependency) | React renderer for three.js: declarative scenes, on-demand rendering (`frameloop="demand"`). Pulls in `zustand`, `scheduler`, `its-fine`, `suspend-react`, `react-use-measure`, `use-sync-external-store`, `buffer`, `base64-js`, `@babel/runtime` |
+| `@types/three` | 0.186.0 (exact) | MIT | `apps/web` (dev) | Types |
+
+Exact versions, because a shader and a renderer are sensitive to minor releases. Measured cost: 925 KB raw / 244 KB gzip for the 3D chunk (Gate 1, [CP6_GATE1_NODE.md](CP6_GATE1_NODE.md)); shrinking it with a custom three.js build is a Gate 2 task.
+
+Conditionally approved but **not yet added**: `@react-three/drei` (not needed: one geometry, one material), `postprocessing` (bloom: a measured experiment first), `motion` (transitions are a 20-line exponential approach on plain numbers). Still not added: a router, a state library, a component library.
+
 ## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
 
 | Package | Version | License | Why |
@@ -51,7 +63,7 @@ Deliberately **not** added: `@vitejs/plugin-react` (Vite 8 compiles TSX itself; 
 | `eslint`, `typescript-eslint` | CP5 | Linting once there is UI code with hooks/a11y rules | Engine guards are already covered by tsconfig + fitness tests |
 | A schema validator (`valibot` or `zod`) | CP7 | Validating imported experiment files/share links | Hand-written validation is fine for the small CP0 config. Re-evaluate when schemas grow. |
 | `idb` (≈1 KB) or raw IndexedDB | CP7 | Persistence | Decide by API ergonomics in a spike |
-| Rendering/motion libraries | CP6 | See [DESIGN_DIRECTION §10](DESIGN_DIRECTION.md) | Only after measured prototypes |
+| ~~Rendering/motion libraries~~ | CP6 | — | Done: `three` + `@react-three/fiber` added at Gate 1 after a measured prototype (see the CP6 section above) |
 
 ## Rejected
 

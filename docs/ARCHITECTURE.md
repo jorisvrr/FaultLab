@@ -137,8 +137,11 @@ step():
 | Trace reconstruction | `@faultlab/trace` incremental `TraceIndex` (ADR-0023) | main |
 | State inspection | `apps/web` `Session`, `useFrame` | main |
 | Rendering and animation | `apps/web` components (minimal in CP5; CP6 visual system) | main |
+| Sculptural rendering (CP6) | `apps/web/src/stage`: pure visual model → R3F stage (full / reduced) or SVG (flat), one WebGL context, ADR-0025 | main |
 
 Package dependencies (runtime): `engine` ← `protocols` ← `experiments` ← `runtime` ← `web`; `trace` uses engine types only. No package below `web` imports React (architecture test).
+
+**The stage is a leaf.** `apps/web/src/stage` imports nothing from the engine, runtime, trace or `Session`: it is handed node sprites (position, radius, lighting, state) and draws them. Rendering frequency therefore cannot influence execution or reconstruction, and the visual model is unit-tested without a browser.
 
 ## 4.1 CP2.5 prototype viewer (`apps/demo`)
 

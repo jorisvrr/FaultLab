@@ -28,4 +28,5 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0022](0022-worker-runtime.md) | Time-sliced Worker runtime: versioned protocol, runIds, credit flow control, watchdog, slice-level determinism guard | Accepted (CP5) |
 | [0023](0023-incremental-trace-index.md) | Incremental TraceIndex (`append`) with typed-array causality (PERF-3) | Accepted (CP5) |
 | [0024](0024-application-architecture.md) | React application foundation for Configure / Simulate / Investigate; constraints for CP6 | Accepted (CP5) |
+| [0025](0025-sculptural-3d-in-the-core-instrument.md) | Sculptural 3D nodes (Three.js / R3F) in the core instrument, with conditions; supersedes DESIGN_DIRECTION §10 restriction and V7 | Accepted (CP6) |
 

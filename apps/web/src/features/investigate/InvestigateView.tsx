@@ -5,6 +5,7 @@ import type { MarkerKind } from '@faultlab/trace';
 import { useFrame, useSession, useSessionView } from '../../app/session-context';
 import { EntryDetail } from '../../components/EntryDetail';
 import { NodeInspector } from '../../components/NodeTable';
+import { WindowedList } from '../../components/WindowedList';
 import { describeEntry, entryTone } from '../../format';
 
 const WINDOW = 25;
@@ -26,11 +27,23 @@ export function InvestigateView() {
     return { expected: fixture.expected.fingerprint, actual, legacy };
   }, [fixture, index, view.run.lifecycle, view.traceVersion]);
 
+  // Markers only grow (append-only trace); keyed on traceVersion like `verification`.
+  const markerIndices = useMemo(() => (index === null ? [] : index.markers.map((m) => m.index)), [index, view.traceVersion]);
+
   if (index === null || frame === null) return <p className="hint">Load and run an experiment first; its trace is inspected here.</p>;
-  const rows =
-    kinds === 'markers'
-      ? index.markers.map((m) => m.index)
-      : Array.from({ length: Math.min(index.length, 2 * WINDOW + 1) }, (_, k) => Math.max(0, Math.min(index.length - (2 * WINDOW + 1), view.cursor - WINDOW)) + k).filter((i) => i >= 0 && i < index.length);
+  // Entries around the cursor: a fixed window of 2·WINDOW+1 rows.
+  const rows = Array.from({ length: Math.min(index.length, 2 * WINDOW + 1) }, (_, k) => Math.max(0, Math.min(index.length - (2 * WINDOW + 1), view.cursor - WINDOW)) + k).filter((i) => i >= 0 && i < index.length);
+  const row = (i: number) => {
+    const e = index.entry(i);
+    return (
+      <>
+        <button type="button" className="link" onClick={() => session.setCursor(i)} data-testid={`entry-${i}`}>
+          #{i} t={e.time} {e.kind}
+        </button>{' '}
+        {describeEntry(e)}
+      </>
+    );
+  };
 
   return (
     <div className="investigate" data-testid="investigate">
@@ -44,19 +57,18 @@ export function InvestigateView() {
             <input type="radio" checked={kinds === 'markers'} onChange={() => setKinds('markers')} data-testid="show-markers" /> markers only
           </label>
         </div>
-        <ol className="entries" data-testid="entries">
-          {rows.map((i) => {
-            const e = index.entry(i);
-            return (
-              <li key={i} aria-current={i === view.cursor ? 'true' : undefined} data-tone={entryTone(e) ?? undefined}>
-                <button type="button" className="link" onClick={() => session.setCursor(i)} data-testid={`entry-${i}`}>
-                  #{i} t={e.time} {e.kind}
-                </button>{' '}
-                {describeEntry(e)}
+        {kinds === 'markers' ? (
+          // Markers can number in the thousands (e.g. leader churn): windowed like the cause chain.
+          <WindowedList items={markerIndices} rowHeight={24} maxRows={20} label="Markers" testId="entries" renderItem={row} empty={<li>no markers</li>} />
+        ) : (
+          <ol className="entries" data-testid="entries">
+            {rows.map((i) => (
+              <li key={i} aria-current={i === view.cursor ? 'true' : undefined} data-tone={entryTone(index.entry(i)) ?? undefined}>
+                {row(i)}
               </li>
-            );
-          })}
-        </ol>
+            ))}
+          </ol>
+        )}
       </section>
       <EntryDetail index={index} at={view.cursor} />
       <section className="investigate__side" aria-label="Analysis">

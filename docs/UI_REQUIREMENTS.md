@@ -80,6 +80,13 @@ Presentation rules that follow from CP4's semantics:
 3. **Term lanes**: a per-term view (who campaigned, who voted for whom, who won, how long without a leader) is derivable from the entries above; it needs no extra engine data.
 4. Vote arrows and majority counters must be built from **delivered** responses, matching `raft-leader-has-quorum`, so the UI and the invariant never disagree.
 
+## CP6 Gate 1 corrections to the CP5 application
+
+Two defects found by the Gate 0 investigation, fixed and covered by tests ([CP6_GATE1_NODE.md](CP6_GATE1_NODE.md)):
+
+- **UX-003 — Investigate froze during live inspection.** The cause chain of the newest entry was rendered in full; with heartbeat-heavy Raft it reaches ≈ 8 000 entries and grows with the run. All engines degraded, WebKit worst (one 8.9 s frame). Cause chains, consequences and the markers list are now windowed: the full chain is always reachable (length shown, scrolling, jumps to the nearest cause and to `run.start`), only the visible rows are in the DOM. **Requirement for every CP6 surface: no list may render an unbounded number of rows.**
+- **UX-004 — Controls reverted for one frame.** Controlled inputs showed the previous value until the next animation frame. `Session` now notifies user-initiated changes synchronously and keeps coalescing Worker data. **Requirement: a control must show the user's intended state within the same event.**
+
 ## CP5 status and constraints for the final frontend (CP6)
 
 **Implemented functionally in CP5** (`apps/web`, minimal styling, not the final design): the three modes (Configure, Simulate, Investigate); UX-001 (explicit lifecycle badge incl. pending pause/stop, "live" vs "replay" wording, configuration shown separately from current state); UX-002 (docked playback bar that never scrolls away, verified at 1200×600); marker navigation to exact entries; node inspection verified against the Worker engine's own snapshots; keyboard operation (Space, ←/→, Shift+←/→, [ ], Home/End, F) with accessible names on every control.

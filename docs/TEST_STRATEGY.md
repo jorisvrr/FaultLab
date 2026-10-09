@@ -98,6 +98,25 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP6 results (Gate 1: regression fixes and the node prototype)
+
+**Tests:** 756 passing (engine 420, trace 23, protocols 184, experiments 49, runtime 55, demo 10, web 15) plus the CP5 fixture writers; all typechecks and the production build pass. Playwright (production build, Chromium = Chrome 154, Firefox 157.0, WebKit 27.2): 14 CP5 tests + 2 CP6 regression tests + 6 prototype tests, each in three engines. Full report: [CP6_GATE1_NODE.md](CP6_GATE1_NODE.md).
+
+| Layer | What it proves | Where |
+|---|---|---|
+| Investigate under live load | A 123 932-entry Raft run with Investigate open the whole time, follow live on and cause chains growing to 8 001 entries; follow off → navigate to an earlier cause → follow on; a replay through the deepest region; 30 × ←. Asserts the full chain stays reachable (count, root jump to `run.start`, `#0` visible after scrolling) and the responsiveness budgets (block < 250 ms, frame p95 < 50 ms, no frame > 250 ms, click → paint < 250 ms) | `apps/web/e2e/investigate-live.spec.ts` |
+| Follow-live control | The checkbox's real `checked` value sampled synchronously, after microtasks and over six frames, in eleven situations (ready, streaming, 49 rapid toggles, `F`, paused, resumed, view switch, historical event, slider drag, run switch) | `apps/web/e2e/follow-control.spec.ts` |
+| Session notification source | User changes notify in the same task and in order; data changes coalesce to one notification per frame (deferred scheduler) | `apps/web/test/session.test.ts` |
+| Node visual model | Protocol vs interaction states; combinations compose without conflict; a crashed node shows no role or activity; transitions interruptible midway and settling exactly; reduced motion snaps in one step | `apps/web/test/node-visual.test.ts` |
+| Rendering architecture (ADR-0025) | One canvas, two draw calls at 1/5/20 nodes, 2 programs / 2 geometries / 0 textures after 15 scene switches; lazy chunk (not loaded by the app, nor by the flat tier); DOM names, `aria-pressed`, keyboard selection; context loss → flat tier → restore; context released on unmount; idle renders nothing; reduced motion | `apps/web/e2e/node-lab.spec.ts` |
+| Prototype performance | Shader compile before the first frame; CPU/GPU per frame at 1/5/20 nodes, full and reduced tiers, three engines | `apps/web/e2e/node-lab.spec.ts` → `test-results/node-lab-<browser>.json` |
+
+Both regression tests were run against the pre-fix code and **failed** there (the browser one in all three engines), so they test the defect and not just the current behaviour.
+
+**Gate 1b (material and lighting revision).** The lighting model was fitted by least squares to ≈ 80 000 interior samples of each of the six reference nodes, and the result checked region by region (highlight ramp, colour temperature per angle, texture contrast, rim crossing, blue-field profile, far field) rather than by mean pixel error alone — a mostly dark sphere keeps that mean low even when the material is wrong. Numbers and the rejected alternatives (baked texture, full-screen bloom, size-dependent falloff, a narrower small-node specular, and a further reduction of the veining) are in [CP6_GATE1_NODE.md](CP6_GATE1_NODE.md) §4–6. The prototype suite is unchanged and still passes in all three engines. GPU time is reported as the **median over three runs**, because the p95 of `EXT_disjoint_timer_query_webgl2` on a laptop GPU is scheduling noise (a 1-node reduced-tier frame measured 4.78 ms p95 in one run); on that basis the material costs ≈ 1 ms extra at 20 nodes in the full tier (1.18 → 2.26–2.83 ms, budget 8 ms), with the reduced tier unchanged.
+
+**Retained memory (CP6 Gate 1, replaces the CP5 leak assertion).** `apps/web/e2e/memory.spec.ts`, Chromium only (no heap API elsewhere; it skips rather than pretend to measure). Two warm-up runs, then five measured disposed runs; growth is the least-squares slope over those samples scaled to the window, plus a bound on the series' spread, plus an assertion that every run terminated its Worker. Verified against a deliberately retained Session per run, which the check must fail. Measured: steady-state growth 0 MB and spread ≤ 0.1 MB over nine invocations; with the injected retention, 19–20 MB per run. The CP5 version compared a warmed-up heap against a cold first sample, so it measured warm-up and failed 2 of 5 full-suite runs; full diagnosis, the six conditions it now satisfies and all numbers are in [CP6_GATE1_NODE.md](CP6_GATE1_NODE.md) §6.
+
 ## CP5 results
 
 **Tests:** 747 passing across seven workspaces (engine 420, trace 23, protocols 184, experiments 49, runtime 55, demo 10, web 6) plus 13 fixture/result writers that run only on request; all typechecks and both production builds pass. Playwright (`apps/web`, production build, Chromium = Chrome 154, Firefox 157.0, WebKit 27.2): 42 passing (14 tests × 3 engines). The CP2.5 demo's 6 Playwright tests still pass in Chrome.

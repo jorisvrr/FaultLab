@@ -102,6 +102,17 @@ Design: [ADR-0021](adr/0021-experiment-spec-and-registry.md) (experiment specs, 
 
 Applies [DESIGN_DIRECTION.md](DESIGN_DIRECTION.md) phases V0–V3: tokens, primitives, graph renderer prototype (measured), timeline and space-time diagram, causal highlighting, fault visualisation. Carries forward UX-001 and UX-002 and the timeline requirements in [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md).
 
+Driven by three approved designs and the UI specification ([FAULTLAB_UI_IMPLEMENTATION_SPEC.md](FAULTLAB_UI_IMPLEMENTATION_SPEC.md)), through review gates. [ADR-0025](adr/0025-sculptural-3d-in-the-core-instrument.md) supersedes the "no 3D in the core instrument" verdict of DESIGN_DIRECTION §10 and phase V7, with conditions.
+
+| Gate | Scope | Status |
+|---|---|---|
+| 0 | Design audit, tokens, inventories, open questions, WebKit investigation ([CP6_DESIGN_AUDIT.md](CP6_DESIGN_AUDIT.md)) | Done, approved |
+| 1 | The two CP5 regressions fixed; the sculptural node prototype ([CP6_GATE1_NODE.md](CP6_GATE1_NODE.md)) | Done, awaiting review |
+| 2 | Design system and component gallery | Next |
+| 3–5 | Configure, Simulate, Investigate at full fidelity | |
+| 6 | Supporting pages, motion, polish | |
+| Final | Accessibility, responsiveness, performance, visual regression, retire the CP2.5 demo | |
+
 ## CP7 — Experiments: save, load, share
 
 IndexedDB persistence; JSON export/import validated at the boundary; share links encode *inputs* (config + fault plan), never traces; on load, re-run and compare fingerprints to detect engine/protocol drift.

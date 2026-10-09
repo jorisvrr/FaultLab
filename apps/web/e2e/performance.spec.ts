@@ -25,7 +25,6 @@ test('pipeline measurements: Worker vs main thread, clone vs json, seeking, paus
   results['worker_small'] = await call((b) => b.workerRun('raft-isolate-leader'));
   results['worker_churn'] = await call((b) => b.workerRun('raft-leader-churn'));
   results['worker_long_pause_resume_40'] = await call((b) => b.workerRun('raft-long-heartbeats', {}, 40));
-  results['leakCheck_heapMB_after_each_of_3_long_runs'] = await call((b: Bench & { leakCheck?: () => Promise<(number | null)[]> }) => b.leakCheck!());
   mkdirSync('test-results', { recursive: true });
   writeFileSync(join('test-results', `perf-${info.project.name}.json`), `${JSON.stringify(results, null, 2)}\n`);
 
@@ -41,8 +40,8 @@ test('pipeline measurements: Worker vs main thread, clone vs json, seeking, paus
   expect(long.mainMaxChunkMs, 'largest main-thread chunk (decode + freeze + index + fingerprint)').toBeLessThan(50);
   expect(long.frameAtMaxMs, 'slowest TraceIndex frame (seek) on the main thread').toBeLessThan(50);
   expect(long.maxFrameGapMs, 'longest frame gap while a 124k-entry run executes in the Worker').toBeLessThan(250);
-  const heaps = results['leakCheck_heapMB_after_each_of_3_long_runs'] as (number | null)[];
-  if (heaps[0] !== null) expect(heaps.at(-1)! - heaps[0]!, 'heap growth after 3 disposed long runs (no leak between runs)').toBeLessThan(10);
+  // Retained memory moved to e2e/memory.spec.ts: the old check compared a warmed-up heap with
+  // a cold one, which measured warm-up rather than retention (CP6 Gate 1, see bench.ts).
 });
 
 test('the app stays responsive while a long run streams and the view follows it live', async ({ page }, info) => {

@@ -36,6 +36,32 @@ async function completed(id: string): Promise<Session> {
 }
 
 describe('Session (UI state, never reaching the simulation)', () => {
+  it('notifies user changes at once (controlled inputs), and coalesces data changes per frame', async () => {
+    // A deferred scheduler, like requestAnimationFrame: nothing runs until we flush it.
+    const frames: (() => void)[] = [];
+    const flush = () => frames.splice(0).forEach((fn) => fn());
+    const session = new Session({ createWorker: memoryWorker, schedule: (fn) => frames.push(fn) });
+    const seen: boolean[] = [];
+    session.subscribe(() => seen.push(session.view.follow));
+    const p = preset('raft-isolate-leader');
+    session.load(p.spec, p);
+    expect(seen, 'load is a user action: listeners hear it in the same task').toEqual([true]);
+    // Every user change, including rapid toggling, is heard immediately and in order.
+    for (const follow of [false, true, false, true, false]) session.setFollow(follow);
+    expect(seen.slice(1)).toEqual([false, true, false, true, false]);
+    session.setCursor(0);
+    session.selectNode('n1');
+    expect(seen).toHaveLength(8);
+    // Data (Worker events) is coalesced: many client updates, one notification per flushed frame.
+    seen.length = 0;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(seen, 'no data notification before the frame').toEqual([]);
+    expect(frames.length).toBeLessThanOrEqual(1);
+    flush();
+    expect(seen).toHaveLength(1);
+    session.dispose();
+  });
+
   it('follows the newest entry while live, and stops following when the user moves the cursor', async () => {
     const session = await completed('raft-isolate-leader');
     expect(session.view.follow).toBe(true);
