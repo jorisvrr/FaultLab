@@ -52,7 +52,11 @@ A temporary prototype in `apps/demo`: Vite + plain TypeScript + SVG, the real en
 - UX findings **UX-001** (confusing initial state) and **UX-002** (controls below the viewport) are recorded in [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) for CP5/CP6; the prototype is intentionally not redesigned.
 - Integration findings are recorded in ENGINEERLOG (CP2.5). Main ones for CP5: export named trace-entry types from the engine; move shared experiments/fixtures out of the engine's `test/`; step-level vs entry-level cursor; indexed (not O(n)-per-frame) state derivation for large traces, which overlaps with CP3's state index.
 
-## CP3 — Snapshots, replay, time travel
+## CP3 — Snapshots, replay, time travel ✅
+
+Delivered: engine snapshots (ADR-0015), keyframes / seeking / trace regeneration (ADR-0016), `@faultlab/trace` TraceIndex (ADR-0017), demo switched to TraceIndex. Results in [TEST_STRATEGY](TEST_STRATEGY.md#cp3-results).
+
+*Original plan:*
 
 - A snapshot captures **all** execution-relevant state: clock, scheduler heap and `nextSeq`, PRNG states, node runtimes (status, incarnation, state, storage, counters, timers), network conditions and partition, trace length.
 - Time travel = restore the nearest snapshot ≤ target, then re-execute.
@@ -91,6 +95,20 @@ Log Matching, Leader Completeness and State Machine Safety invariants; a client 
 
 Profile before optimising. Targets: 100+ nodes, 10⁶+ events. Candidates: trace chunking/diff encoding, render LOD, typed-array event storage. Rust/WASM only if profiling proves the engine is the bottleneck.
 
+**Open investigation PERF-3 — TraceIndex memory. Must be investigated BEFORE the performance-sensitive frontend integration (CP5/CP6), not deferred to CP9.** CP3 measurement (100 000 steps, 287 533 entries, 78 MB trace): the index retains a further **64–83 MB** (checkpoint interval 4 096 → 64), roughly doubling memory. That is significant for a browser application. Checkpoints explain the interval-dependent part (~18 MB at 64); the fixed ~64 MB is, unverified, per-entry child arrays for causal navigation and per-message records. Candidates: compressed sparse-row (Int32Array) adjacency for `cause`/`conditionIndex`, lazily built message records. Decide after a heap profile; frames must stay identical.
+
+**Open investigation PERF-4 — seek latency outliers.** In the CP3 benchmark, median seeks were 0.27–9.2 ms, but some single seeks took **114–146 ms** (K = 256, 1 024, 4 096; 40 targets each). Unexplained; garbage collection is a hypothesis, not a finding. Relevant for scrubbing.
+
+**Performance gate before the final interactive timeline (CP5/CP6).** Measure and profile first, with no algorithm changes before evidence, and preserving correctness, determinism and immutability. The following must be understood:
+1. TraceIndex memory retention (PERF-3);
+2. keyframe memory requirements for realistic run sizes;
+3. seeking latency and its outliers (PERF-4);
+4. browser responsiveness during large simulations (main thread vs. Worker);
+5. garbage-collection behaviour (allocation per step and per frame);
+6. performance while scrubbing repeatedly (sustained `frameAt` / `seek` calls).
+
+PERF-1 (CP1 benchmark outliers) and PERF-2 (invariant view construction) remain open as separate investigations.
+
 **Open investigation PERF-2 — invariant view construction.** With invariants enabled, ≈ 5 µs per step is spent building the frozen `SimulationView`, independent of the checkers (CP2 measurement: 528 → 1 026 ms per 100 000 events for one no-op invariant). Measurements are preserved in [TEST_STRATEGY, CP2 results](TEST_STRATEGY.md#runtime-verification-overhead) (0 / 1 / 5 invariants, plus the no-op decomposition showing that building the frozen view is the main cost). Candidates, to be decided only after profiling: reuse `NodeView` objects for nodes whose state/status/storage did not change (immutability makes reuse safe), avoid per-step closures, let invariants declare which entry kinds can affect them, and avoid re-validating unchanged history. **Constraint:** any optimisation must keep the same correctness and isolation guarantees with less allocation and copying, never by weakening them. Determinism and runtime immutability take precedence over speed, and the existing graph-walk, mutation-attempt and golden-fingerprint tests must pass unchanged.
 
 **Open investigation PERF-1 — CP1 latency outliers.** In the CP0-vs-CP1 A/B benchmark (200 000-event echo workload, 21 runs each), CP1 had a median of 477 ms but individual runs of 547–660 ms, which appeared more often than in CP0. It is *not* a correctness concern: traces are byte-identical across runs (determinism suite), so only wall-clock time varies. Hypotheses, none verified: (a) garbage collection pressure from larger trace entries (`incarnation` fields) and the per-handler storage object in `createNodeContext`; (b) JIT deoptimisation from the wider `TraceEntry` union; (c) machine noise. Plan: run with `--trace-gc` and `--cpu-prof`, compare allocation per event between CP0 and CP1, and repeat with more runs in a quieter environment. Decide on fixes only after profiling.
@@ -98,6 +116,10 @@ Profile before optimising. Targets: 100+ nodes, 10⁶+ events. Candidates: trace
 ## CP10 — User-defined protocols
 
 A security architecture ADR first: isolation, deterministic resource metering, API surface, threat model. Never remote execution.
+
+## Future architecture review (not yet scheduled)
+
+- **Version naming:** the engine version `0.3.0-cp2` denotes trace semantics, not a build; the trace format has no separate version (SEMANTICS §16). Consider separate `semanticsVersion` / `traceFormat` fields. Not to be changed casually: it alters every trace and golden fingerprint.
 
 ## Deferred network features (not yet scheduled)
 

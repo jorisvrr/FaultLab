@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: CP2. This document describes what exists **and** the planned shape, and marks which is which.
+> Status: CP3. This document describes what exists **and** the planned shape, and marks which is which.
 
 ## 1. Goals that shape the architecture
 
@@ -24,7 +24,7 @@
 └────────┼──────────────────────────────────────────────────────────────────┘
          │ plain function calls
 ┌────────▼──────────────────────────────────────────────────────────────────┐
-│ packages/engine  (CP2 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
+│ packages/engine  (CP3 ✅)   @faultlab/engine — no DOM, no Node, no deps   │
 │                                                                           │
 │   Simulation ──► EventScheduler ──► BinaryHeap        VirtualClock        │
 │      │   │       (time, seq) order; compaction                            │
@@ -39,7 +39,12 @@
 │      ├──► in-flight message index (send order)                            │
 │      └──► resolveConfig / resolveFaults / resolveInvariants / toFrozenJson│
 │                                                                           │
-│   later: Snapshot (CP3) · bounded liveness (CP4)                          │
+│      ├──► snapshot() / restore() (step boundaries, validated JSON)        │
+│      └──► TimeTravel: keyframes every K steps, seek, regenerate segments  │
+│   later: bounded liveness (CP4)                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│ packages/trace   (CP3 ✅)   @faultlab/trace — engine TYPES only, no deps  │
+│   TraceIndex: checkpoints every C entries, frames, steps, markers, causes │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -99,9 +104,18 @@ step():
  10. pending events > maxPendingEvents? → stop
 ```
 
+## 4.0 CP3: four separate concerns
+
+| Concern | Where | Knows about |
+|---|---|---|
+| Simulation execution | `Simulation.step()` | config, protocol, faults, invariants |
+| Engine snapshots and time travel | `snapshot.ts`, `time-travel.ts` | execution state at **step boundaries** |
+| Trace reconstruction | `@faultlab/trace` (`TraceIndex`) | a completed trace only; any **entry** |
+| Frontend rendering | `apps/demo` (later `apps/web`) | TraceIndex frames; never engine internals |
+
 ## 4.1 CP2.5 prototype viewer (`apps/demo`)
 
-A throwaway check that the engine works outside tests. It imports `@faultlab/engine` unchanged, **executes** a bounded experiment synchronously, and then **replays** the finished trace: the view is a pure function of (trace, cursor, display time) computed by `derive.ts`, which has no framework or DOM dependency. No engine internals are read; anything not derivable from the trace is not shown. The real UI (CP5/CP6) replaces everything here except, likely, `derive.ts`.
+A throwaway check that the engine works outside tests. Since CP3 its `derive.ts` is a thin adapter over `@faultlab/trace`. It imports `@faultlab/engine` unchanged, **executes** a bounded experiment synchronously, and then **replays** the finished trace: the view is a pure function of (trace, cursor, display time) computed by `derive.ts`, which has no framework or DOM dependency. No engine internals are read; anything not derivable from the trace is not shown. The real UI (CP5/CP6) replaces everything here except, likely, `derive.ts`.
 
 ## 5. Planned boundaries (not built yet)
 

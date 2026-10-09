@@ -18,3 +18,6 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0012](0012-invariant-model.md) | Invariants: pure online checkers over frozen views, explicit JSON history | Accepted (CP2) |
 | [0013](0013-violation-policies.md) | Stop-on-first by default, episode de-duplication, explainable violation records | Accepted (CP2) |
 | [0014](0014-fault-exploration-and-shrinking.md) | fast-check fault exploration, 1-minimal shrinking, stored counterexample fixtures | Accepted (CP2) |
+| [0015](0015-engine-snapshots.md) | Engine snapshots: complete state at step boundaries, versioned JSON, untrusted-input validation | Accepted (CP3) |
+| [0016](0016-keyframes-and-trace-regeneration.md) | Keyframes every K steps; seeking; trace regeneration with absolute indices | Accepted (CP3) |
+| [0017](0017-trace-index-package.md) | `@faultlab/trace`: read-only, checkpointed TraceIndex (K entries) | Accepted (CP3) |

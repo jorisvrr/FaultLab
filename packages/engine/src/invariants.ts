@@ -165,6 +165,15 @@ export function resolveInvariants(input: unknown): readonly ResolvedInvariant[] 
   );
 }
 
+/** Per-invariant execution state captured in snapshots. */
+export interface InvariantMonitorEntryState {
+  readonly id: string;
+  readonly version: string;
+  readonly history: JsonValue;
+  /** Open violation episode id under record-and-continue, or null. */
+  readonly open: string | null;
+}
+
 /** One result of evaluating the invariants after a step, in configuration order. */
 export type InvariantOutcome =
   | {
@@ -203,6 +212,28 @@ export class InvariantMonitor {
   /** Total violations recorded so far. */
   get violations(): number {
     return this.#violations;
+  }
+
+  /** The monitor's complete execution state, for snapshots (CP3). History is frozen JSON. */
+  exportState(): { readonly violations: number; readonly states: readonly InvariantMonitorEntryState[] } {
+    return {
+      violations: this.#violations,
+      states: this.#invariants.map((invariant, i) => ({
+        id: invariant.ref.id,
+        version: invariant.ref.version,
+        history: this.#history[i] as JsonValue,
+        open: this.#open[i] ?? null,
+      })),
+    };
+  }
+
+  /** Restore state exported by `exportState` (already validated against the configuration). */
+  importState(state: { readonly violations: number; readonly states: readonly InvariantMonitorEntryState[] }): void {
+    this.#violations = state.violations;
+    state.states.forEach((entry, i) => {
+      this.#history[i] = entry.history;
+      this.#open[i] = entry.open;
+    });
   }
 
   history(id: string): JsonValue | undefined {

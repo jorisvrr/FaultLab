@@ -273,33 +273,65 @@ export type TraceEntryKind = TraceEntry['kind'];
 /** Distributes Omit over a union, so each variant keeps its own fields. */
 export type NewTraceEntry = TraceEntry extends infer T ? (T extends TraceEntry ? Omit<T, 'index'> : never) : never;
 
+/** Position of an entry in the trace (absolute, 0-based). */
+export type EntryIndex = number;
+
 /**
  * Append-only execution trace. Entries are frozen when appended and are never modified or
  * removed, so an index handed out once (e.g. as a `cause`) stays valid forever.
+ *
+ * A trace may hold only a SEGMENT: after restoring a snapshot without its trace prefix, the
+ * trace starts at `firstIndex` > 0 and new entries keep their ABSOLUTE indices, so causal
+ * references stay identical to an uninterrupted run (CP3, ADR-0016).
  */
 export class EventTrace {
-  readonly #entries: TraceEntry[] = [];
+  #entries: TraceEntry[];
+  #first: EntryIndex;
 
-  get length(): number {
-    return this.#entries.length;
+  /** @param first absolute index of the first entry this trace will hold (0 for a full trace). */
+  constructor(first: EntryIndex = 0, prefix: readonly TraceEntry[] = []) {
+    this.#first = first;
+    this.#entries = [...prefix];
   }
 
-  append(entry: NewTraceEntry): number {
-    const index = this.#entries.length;
+  /** Absolute index of the first retained entry. */
+  get firstIndex(): EntryIndex {
+    return this.#first;
+  }
+
+  /** Absolute length: the index the next appended entry will get. */
+  get length(): number {
+    return this.#first + this.#entries.length;
+  }
+
+  append(entry: NewTraceEntry): EntryIndex {
+    const index = this.length;
     this.#entries.push(deepFreeze({ index, ...entry }) as TraceEntry);
     return index;
   }
 
-  at(index: number): TraceEntry | undefined {
-    return this.#entries[index];
+  /** Entry at an absolute index, or undefined if it is not retained in this trace. */
+  at(index: EntryIndex): TraceEntry | undefined {
+    return index < this.#first ? undefined : this.#entries[index - this.#first];
   }
 
-  /** Frozen copy of the entries from `start` to the end. */
-  slice(start: number): readonly TraceEntry[] {
-    return Object.freeze(this.#entries.slice(start));
+  /**
+   * Stop retaining entries before absolute index `index` (memory-bounded runs, ADR-0016). The
+   * entries can be regenerated exactly from a keyframe. The newest entry is always kept.
+   */
+  releaseBefore(index: EntryIndex): void {
+    const drop = Math.min(Math.max(0, index - this.#first), this.#entries.length - 1);
+    if (drop <= 0) return;
+    this.#entries = this.#entries.slice(drop);
+    this.#first += drop;
   }
 
-  /** A frozen copy of the entries; later appends do not affect it. */
+  /** Frozen copy of the retained entries from absolute index `start` to the end. */
+  slice(start: EntryIndex): readonly TraceEntry[] {
+    return Object.freeze(this.#entries.slice(Math.max(0, start - this.#first)));
+  }
+
+  /** A frozen copy of the retained entries; later appends do not affect it. */
   snapshot(): readonly TraceEntry[] {
     return Object.freeze(this.#entries.slice());
   }

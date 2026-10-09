@@ -4,7 +4,7 @@
 
 FaultLab runs networks of virtual computers executing distributed protocols under controlled latency, crashes, message loss and partitions. Every run is reproducible from its seed. Every message, timer and state change is recorded in an append-only, causally linked trace that you can inspect, replay and share.
 
-> **Status: CP2, invariant checking and fault exploration.** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, plus online safety invariants with explainable violations and automatic search for minimal failing fault plans. There is no UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
+> **Status: CP3, snapshots, replay and time travel.** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, plus online safety invariants with explainable violations and automatic search for minimal failing fault plans. There is no UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -78,6 +78,8 @@ const result = runSimulation({
 - **Invariants** (state and historical) evaluated after every step over deeply frozen views; stop-on-first or record-and-continue; explainable violation records that separate facts from claims
 - **Fault exploration**: fast-check generates fault plans, shrinks failures to 1-minimal counterexamples, and stores them as replayable fixtures
 - In-flight message index, property-tested against the scheduler and the trace
+- **Snapshots** at step boundaries (versioned JSON, validated as untrusted), **keyframe time travel** (seek in < K steps, regenerate any trace range with absolute indices, memory-bounded runs)
+- **`@faultlab/trace`**: a framework-independent TraceIndex for fast, exact inspection of any trace entry, steps, markers and causal chains
 - 313 tests: unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
 
 ## Getting started
@@ -103,6 +105,7 @@ npm run test:e2e   # Playwright checks against the locally installed Chrome
 
 ```
 packages/engine/        @faultlab/engine: zero runtime dependencies, no DOM, no Node
+packages/trace/         @faultlab/trace: read-only TraceIndex over completed traces (engine types only)
   src/                  scheduler, clock, PRNG, network, protocol API, trace, simulation
   src/fixtures/         example protocols (ping, echo-forever)
   test/                 Vitest + fast-check suites; test/reference/ holds the C PRNG oracle

@@ -297,3 +297,73 @@ Engine versions change the trace format only by **adding** information. `test/le
 | `0.3.0-cp2` | `run.start.invariants`, `run.start.invariantPolicy`, `run.start.limits.maxViolations`; entries `invariant.violation`, `invariant.cleared`, `invariant.error`; stop reasons `invariant-violation`, `invariant-error`, `violation-limit`; all entries deeply frozen |
 
 Configurations from earlier versions remain valid; every new config field is optional.
+
+## 13. Steps, scheduled events, trace entries, virtual time (CP3 terminology)
+
+These four words mean different things and are never used interchangeably:
+
+| Concept | Type / name | Definition | Example |
+|---|---|---|---|
+| **Scheduled event** | `ScheduledEvent` (internal) | An item in the scheduler queue: `node.start`, `message.deliver`, `timer.fire`, or a plan `fault`. | n3's `tick` timer, due at t=209 |
+| **Simulation step** | counted by `StepCount` (`sim.stepsCompleted`, alias of `eventsProcessed`) | One call to `step()` that dispatches exactly **one** scheduled event, plus everything that follows from it: the handler, its committed effects, invariant evaluation and, if the run stops in that call, `run.end`. Steps are the **only** points where execution can be paused, snapshotted and resumed. | Step 129 in the split-brain fixture: n3's tick → claim leadership → 3 sends, 3 drops, state update → `invariant.violation` → `run.end` |
+| **Trace entry** | `TraceEntry`, position `EntryIndex` | One immutable record appended to the trace. One step appends **one or more** entries (it can be thousands). Entries can be *inspected* individually; execution **cannot** be resumed from an entry inside a step. | `#386 storage.write` inside step 129 |
+| **Virtual time** | `VirtualTime` | The clock value. Many steps, and many entries, can share one virtual time. | t=209 |
+
+Consequences:
+
+- `#0 run.start` precedes step 1 ("step 0" = the initial state). `run.end` belongs to the step whose call stopped the run; when the run stops *before* dispatching (quiescent, event limit, time limit), it is appended by a call that dispatches nothing and belongs to no step.
+- A step's first entry is its **trigger**: the entry recording the dispatched event (`node.start`, `message.deliver`, `timer.fire`, a fault entry, `fault.skipped`, or a delivery-time `message.drop` with reason `partitioned-in-flight` / `node-down`). Send-time drops (`partitioned`, `lost`) are not triggers; they are effects inside a step.
+- **Engine snapshots** (§14) exist only at step boundaries: "after N completed steps". There is no snapshot "at entry #386".
+- The **TraceIndex** (§15) answers questions about any entry, including entries inside a step, but it only *reads* the trace and never resumes execution.
+
+**Units of the two intervals (never interchangeable):**
+
+| Interval | Unit | Bound it guarantees |
+|---|---|---|
+| Engine keyframe interval `keyframeSteps` | simulation **steps** | `seek(n)` restores the nearest keyframe ≤ n and re-executes **at most `keyframeSteps − 1` steps** (however many entries those steps produce) |
+| TraceIndex checkpoint interval `checkpointEntries` | trace **entries** | `frameAt(i)` starts from the nearest checkpoint ≤ i and applies **at most `checkpointEntries − 1` entries** (however many steps those entries span) |
+
+## 14. Engine snapshots and time travel (CP3)
+
+Design: [ADR-0015](adr/0015-engine-snapshots.md), [ADR-0016](adr/0016-keyframes-and-trace-regeneration.md).
+
+- `sim.snapshot()` captures the complete execution state **after `stepsCompleted` steps** as `faultlab-snapshot/1` JSON (deeply frozen; states and payloads shared with the live run). Contents: the full `run.start` (all inputs), position (`stepsCompleted`, absolute `traceLength`, `time`, last-entry fingerprint), stop reason, scheduler (`nextSeq`; live events in dispatch order with original sequence numbers; faults by id), network (random state; partition and link conditions with their source entries, insertion order), nodes (lifecycle, `crashedAt`, `stateEntry`, volatile state, storage and timers in insertion order, id counters, random state), invariant monitor (counter, history, open episode per invariant).
+- `Simulation.restore(config, snapshot, { tracePrefix? })` validates the snapshot as untrusted input (§14.1) and rebuilds the run. With a prefix the trace is complete; without one it is a **segment** that starts at the snapshot's absolute `traceLength`, so new entries keep the indices (and causes) of an uninterrupted run.
+- **Guarantee:** for every step boundary k, `restore(snapshot@k)` followed by running is byte-identical to the uninterrupted run from k on; `snapshot(restore(s))` equals `s`; taking snapshots never changes the trace.
+- `TimeTravel.record(config, { keyframeSteps: K, retainTrace })` keeps a snapshot at step 0 and every K steps. `seek(n)` restores the last keyframe ≤ n and re-executes **< K steps**; `regenerate(a, b)` returns the entries of steps (a, b] with their absolute indices. `sim.releaseTraceBefore(i)` drops retained entries (never the newest) for memory-bounded runs.
+
+### 14.1 Snapshot validation
+
+Bounds (depth ≤ 200, ≤ 5 M values, strings ≤ 1 M chars) → plain JSON → format and engine version → **exact** equality of `inputs` with the configuration → structural and cross-field consistency (node order and lifecycle, counters vs. ids, timers ↔ queued `timer.fire` events, strict (time, seq) order, seqs < `nextSeq`, events ≥ clock, partition coverage, link validity, invariant states) → with a prefix, kind checks of every referenced entry.
+
+**What validation guarantees, and what it does not:**
+
+- ✅ Snapshots are validated for **internal consistency**.
+- ✅ Snapshot **format** and **experiment compatibility** (engine version, exact inputs, protocol and invariant identity) are checked.
+- ✅ Invalid or incompatible snapshots are **rejected** with a `SnapshotError` naming the path and the rule; nothing is partially restored.
+- ❌ Validation provides **no authenticity** and **no protection against deliberately forged data**. Fingerprints detect accidents and mix-ups; whoever controls a snapshot can make it consistent. A snapshot is as trustworthy as its source. No cryptographic signing is planned until there is a real threat model (e.g. shared experiments in CP7).
+
+## 15. TraceIndex (CP3, `@faultlab/trace`)
+
+Design: [ADR-0017](adr/0017-trace-index-package.md). A read-only index over a **complete** trace (starting at `run.start`, no gaps):
+
+- `frameAt(i, displayTime?)`: state after entry i (nodes with status, incarnation, state + source entry, storage, pending timers; in-flight messages; recent drops; partition; links; open violations; the entry's step). Work per query ≤ `checkpointEntries − 1` entries.
+- `steps`, `stepOf(i)`, `step(k)`: step ranges derived from trigger kinds (§13), identical to the engine's `step()` calls.
+- `markers`, `nextMarker`, `previousMarker`: fault, violation and end markers at exact entries.
+- `causeOf`, `ancestors`, `consequences` (direct by `cause`, explained by `conditionIndex`), `descendants`.
+- Not reconstructible from a trace: PRNG states, sequence numbers, queue layout, invariant histories. Use an engine snapshot for those.
+
+## 16. Versions: engine, trace format, snapshot format
+
+Three different things carry version information. They change for different reasons:
+
+| Version | Where | What it identifies | Changes when |
+|---|---|---|---|
+| **Engine version** (`ENGINE_VERSION`, e.g. `0.3.0-cp2`) | `run.start.engineVersion`, snapshots, counterexample fixtures | The **observable behaviour** of the engine: which trace a given configuration produces | Anything could alter a trace from identical inputs: ordering, randomness, semantics, *or* the trace format. Guarded by the golden fingerprints |
+| **Trace format** | implied by the engine version; history in §12 | The shape of trace entries | Entries or fields are added. Always together with an engine-version bump (today the two are not separated) |
+| **Snapshot format** (`SNAPSHOT_FORMAT` = `faultlab-snapshot/1`) | `snapshot.format` | The shape of an engine snapshot | The snapshot schema changes. Independent of the engine version |
+| *Package versions* (`package.json`, `0.0.0`) | npm workspaces | Nothing yet (private packages) | Not used |
+
+**CP3 example.** CP3 added snapshots, keyframes and the TraceIndex but changed no trace from identical inputs. So the engine version intentionally stays `0.3.0-cp2` (all golden fingerprints unchanged), and the new artefact is versioned as `faultlab-snapshot/1`. The suffix `-cp2` therefore means "semantics last changed in CP2", not "built in CP2".
+
+**Known naming debt.** The `-cpN` suffix suggests a build or checkpoint number while it actually denotes trace semantics, and the trace format has no version of its own. A clearer scheme (e.g. separate `traceFormat` and `semanticsVersion`) is listed for a future architecture review ([ROADMAP](ROADMAP.md)); it is deliberately not changed now, because changing it would itself alter every trace and fingerprint.

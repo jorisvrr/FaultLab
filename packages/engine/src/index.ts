@@ -35,5 +35,15 @@ export {
   type ViolationReport,
 } from './invariants';
 export { DEFAULT_LIMITS, MAX_NODES, resolveConfig, type Limits, type ResolvedConfig, type SimulationConfig } from './config';
-export { EventTrace, fingerprintTrace, serializeTrace, type StopReason, type TraceEntry, type TraceEntryKind } from './trace';
+export { EventTrace, fingerprintTrace, serializeTrace, type EntryIndex, type StopReason, type TraceEntry, type TraceEntryKind } from './trace';
 export { runSimulation, Simulation, type NodeInfo, type RunResult } from './simulation';
+export { TimeTravel, type Keyframe, type RecordOptions, type SeekResult } from './time-travel';
+export {
+  SNAPSHOT_FORMAT,
+  SNAPSHOT_LIMITS,
+  SnapshotError,
+  type NodeSnapshot,
+  type SimulationSnapshot,
+  type SnapshotEvent,
+  type StepCount,
+} from './snapshot';

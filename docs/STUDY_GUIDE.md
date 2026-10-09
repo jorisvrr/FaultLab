@@ -102,6 +102,26 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 
 **Exercise:** change the exploration's earliest fault time from 150 to 0 and rerun. Is the counterexample still a meaningful demonstration? Why did we choose 150?
 
+## 15. Snapshots and restore (CP3) — `src/snapshot.ts`, `snapshot()` / `restore()` / `#load` in `src/simulation.ts`
+
+**Know:** the difference between a step, a scheduled event, a trace entry and a virtual time (SEMANTICS §13); why a snapshot can only exist at a step boundary; which state is stored and which is *derived* on restore (in-flight index, heap layout); why insertion order must survive; what validation can and cannot protect against.
+
+**Exercises**
+1. Remove `messagesSent` from the restore and predict which property fails, and why (hint: message ids).
+2. Explain why the snapshot keeps the complete `run.start` entry instead of only its fingerprint.
+
+## 16. Keyframes and seeking — `src/time-travel.ts`
+
+**Know:** binary search over keyframes; why the bound is "< K steps" and not "< K entries"; how absolute entry indices let a regenerated segment slot into the original trace.
+
+**Exercise:** with the CP3 benchmark table, choose K for a UI that must seek in < 5 ms and use < 10 MB for keyframes. Justify it.
+
+## 17. TraceIndex — `packages/trace/src/trace-index.ts`
+
+**Know:** checkpointing (copy the state every C entries, replay at most C − 1); why the index cannot reconstruct PRNG states or invariant histories; how step boundaries are derived from entry kinds; how consequences invert `cause`.
+
+**Exercise:** sketch how compressed-sparse-row arrays would replace the per-entry child arrays (PERF-3), and how you would prove frames stay identical.
+
 ## Interview-style questions to practise
 
 - Why integer ticks instead of float milliseconds? What would break first with floats?
@@ -117,3 +137,6 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 - How do you prevent an invariant from changing the simulation it checks? Why are `readonly` types not enough?
 - Your property tests passed immediately. What did you do to make sure they were actually testing something?
 - A stored counterexample stopped reproducing after an engine change. What does the test do, and what should you do?
+- What exactly is in a FaultLab snapshot, and how did you prove nothing is missing?
+- Why can the UI inspect entry #386 but never resume execution from it?
+- Your memory benchmark reported negative numbers. What was wrong with the method, and how did you fix it?

@@ -1064,3 +1064,285 @@ Deze handmatige observaties komen bovenop de automatische tests (313 engine-test
 1. Waarom is "alle nodes not started bij entry #0" correct, en waarom is het tóch een probleem? Hoe los je dat op zonder te liegen over de toestand?
 2. Waarom moet een klik op een tijdlijnmarkering naar een *entry* springen en niet naar een *tijdstip*?
 3. Welke drie dingen bewees CP2.5 over de engine, en welke twee dingen kon geen enkele automatische test ons vertellen?
+
+---
+
+## CP3 — Snapshots, replay en tijdreizen
+
+**Datum:** 2026-10-09 · **Status:** afgerond en goedgekeurd · **Engine-versie:** `0.3.0-cp2` (bewust ongewijzigd: geen enkele trace is veranderd)
+
+Tot CP2.5 kon je een run alleen vanaf het begin opnieuw afspelen. In CP3 kan de engine zijn complete toestand vastleggen en later precies daar verdergaan, kun je via "keyframes" snel naar elk moment springen, en zoekt een losse `TraceIndex` voor elke trace-entry uit hoe de wereld er op dat moment uitzag. Het ontwerp staat in ADR-0015 t/m ADR-0017 en in SEMANTICS §13–15.
+
+### CP3.1 — Eerst de woorden: stap, event, entry en tijd
+
+**1. Wat hebben we gebouwd?**
+Vaste definities, met eigen types en namen in de code (`StepCount`, `EntryIndex`, `VirtualTime`):
+- een **scheduled event** is één item in de wachtrij;
+- een **simulatiestap** is één aanroep van `step()` die precies één event afhandelt, met alles wat daaruit volgt;
+- een **trace-entry** is één regel in het logboek; één stap kan er duizenden opleveren;
+- **virtuele tijd** is de klok. Veel stappen kunnen op hetzelfde tijdstip vallen.
+
+**2. Waarom is dit nodig?**
+Als je deze begrippen door elkaar gebruikt, beloof je dingen die niet kunnen. Bijvoorbeeld "ga verder vanaf entry #386", terwijl die entry midden in een stap zit.
+
+**3. Hoe werkt het?**
+Snapshots bestaan alleen op een stapgrens ("na 129 stappen"). De TraceIndex kan elke entry *bekijken*, maar nooit vanaf een entry verder *uitvoeren*. De twee intervallen hebben ook verschillende eenheden: `keyframeSteps` telt stappen, `checkpointEntries` telt entries.
+
+**4. Welke keuzes zijn gemaakt?**
+Twee aparte namen in plaats van één generieke "K", zodat de eenheid altijd in de naam zelf staat.
+
+**5. Welke problemen kwamen we tegen?**
+De vraag "hoort `run.end` bij een stap?" had twee antwoorden. Stopt de run *tijdens* een stap (bijvoorbeeld door een overtreding), dan hoort `run.end` bij die stap. Stopt hij *voordat* er een event is (tijdslimiet), dan hoort `run.end` bij geen enkele stap. Dat staat nu in de documentatie en is getest tegen de echte `step()`-aanroepen.
+
+**6. Hoe hebben we het getest?**
+✅ De stapgrenzen van de TraceIndex zijn gelijk aan de echte `step()`-aanroepen van de engine, voor 60 willekeurige experimenten.
+
+**7. Wat heb ik hiervan geleerd?**
+Precieze woorden voorkomen beloftes die de code niet kan waarmaken.
+
+**8. Belangrijkste begrippen**
+- **Stapgrens:** het moment tussen twee stappen, het enige punt waarop je kunt pauzeren.
+- **Granulariteit:** hoe fijn je iets kunt opdelen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan de engine niet "verder vanaf entry #386", terwijl de TraceIndex die entry wél kan tonen?
+2. Een stap levert 600 entries op. Wat betekent dat voor de grens "minder dan K stappen opnieuw uitvoeren"?
+
+### CP3.2 — Snapshots: event sourcing met tussenstanden
+
+**1. Wat hebben we gebouwd?**
+`sim.snapshot()` legt de complete uitvoeringstoestand vast als bevroren, geversioneerde JSON (`faultlab-snapshot/1`). `Simulation.restore()` bouwt daaruit een simulatie op die precies zo verdergaat.
+
+**2. Waarom is dit nodig?**
+FaultLab is eigenlijk **event sourcing**: de trace is de reeks gebeurtenissen, en de toestand is het resultaat van al die gebeurtenissen na elkaar. Zonder tussenstanden moet je voor "stap 90.000" alles vanaf stap 0 opnieuw doen. Een snapshot is zo'n tussenstand.
+
+**3. Hoe werkt het?**
+De snapshot bevat alles wat de toekomst beïnvloedt:
+- de volledige `run.start` (alle invoer);
+- de klok en de wachtrij: elk event met zijn **originele volgnummer**, en het volgende volgnummer;
+- alle random-stream-toestanden;
+- het netwerk: partitie en linkfouten;
+- per node: status, incarnatie, state, opslag, timers en tellers;
+- de invariant-monitor.
+
+Wat je kúnt afleiden, wordt níét opgeslagen maar bij het herstellen opnieuw berekend. Voorbeelden zijn de index van berichten onderweg en de indeling van de heap. Zo kunnen twee kopieën van dezelfde informatie nooit uit elkaar lopen.
+
+```ts
+const snap = sim.snapshot();                        // na N stappen
+const kopie = Simulation.restore(config, snap);     // controleert eerst alles
+kopie.run();                                         // exact dezelfde rest van de trace
+```
+
+**4. Welke keuzes zijn gemaakt?**
+- JSON in plaats van een binair formaat: leesbaar, en de metingen gaven geen reden voor iets anders (±10 kB per snapshot).
+- Volgorde telt. De volgorde van timers bepaalt de lijst `cancelledTimers` bij een crash, dus maps worden als **geordende lijsten** opgeslagen.
+- De engineversie bleef `0.3.0-cp2`. CP3 verandert geen enkele trace, en alle oude golden fingerprints slagen ongewijzigd.
+
+**5. Welke problemen kwamen we tegen?**
+- ✅ Mutatietest S13 (opslag in omgekeerde volgorde herstellen) **overleefde** eerst. Elk testprotocol gebruikte maar één opslagsleutel per node, en een lijst van één kun je niet omdraaien. Een nieuwe test met meerdere sleutels vangt hem nu. Daarbij ontdekte ik dat writes binnen één stap op alfabetische volgorde worden vastgelegd. Mijn verwachting was dus eerst fout, niet de engine.
+- In twee tests nam ik aan dat een run "stap 400" haalt; hij stopte al na 298. Weer een aanname in de test, niet in de engine.
+
+**6. Hoe hebben we het getest?**
+✅ **Metamorfisch testen:** "N stappen in één keer" moet gelijk zijn aan "k stappen, snapshot, herstellen, rest". Dat is getest voor willekeurige k, protocollen, faultplannen en beide policies, met en zonder trace-prefix, en via een JSON-ronde (120 runs). ✅ Een snapshot van een herstelde run is identiek aan het origineel. ✅ Na elke stap een snapshot nemen verandert de trace niet. ✅ De originele run en de kopie zijn onafhankelijk. ✅ De opgeslagen tegenvoorbeelden spelen ook vanaf een snapshot halverwege exact af.
+
+**7. Wat heb ik hiervan geleerd?**
+De zekerste manier om te bewijzen dat een snapshot compleet is: elk veld één voor één weghalen en controleren dat er dan een test faalt.
+
+**8. Belangrijkste begrippen**
+- **Event sourcing:** toestand opslaan als een reeks gebeurtenissen.
+- **Snapshot / checkpoint:** een opgeslagen tussenstand.
+- **Metamorfisch testen:** twee verschillende wegen naar hetzelfde antwoord moeten gelijk uitkomen.
+- **Deterministische replay:** dezelfde invoer, vanaf hetzelfde punt, geeft exact dezelfde vervolgtrace, ook na een snapshot en herstel.
+- **Afgeleide data:** data die je opnieuw kunt berekenen, en dus niet opslaat.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom slaat de snapshot de index van berichten onderweg niet op, maar wel de wachtrij?
+2. Wat zou er misgaan als het volgende volgnummer (`nextSeq`) niet hersteld wordt? Gebruik de regel "op hetzelfde tijdstip gaat wie eerst ingepland is".
+3. Waarom bewijst "N stappen = k stappen + herstellen + rest" meer dan één losse voorbeeldtest?
+
+### CP3.3 — Een snapshot is onbetrouwbare invoer
+
+**1. Wat hebben we gebouwd?**
+`validateSnapshot`: een strenge controle voordat iets hersteld wordt.
+
+**2. Waarom is dit nodig?**
+Later komen snapshots uit opslag en uit gedeelde links (CP7). Een kapotte of verkeerde snapshot mag nooit een simulatie opleveren die stilletjes iets anders doet.
+
+**3. Hoe werkt het?**
+De controle gaat in deze volgorde:
+1. Eerst de grootte en de diepte, zonder recursie, zodat een kwaadaardig diep genest object de controle zelf niet kan laten crashen.
+2. Dan JSON, formaat en engineversie.
+3. Dan of de invoer **exact** gelijk is aan de configuratie. Dat is een volledige vergelijking, geen hash.
+4. Dan de interne samenhang: elke timer heeft precies één wachtend event (en andersom), events staan in de juiste volgorde, bericht-ids passen bij de tellers, enzovoort.
+5. Met een trace-prefix: wijst elke verwijzing naar een entry van het juiste soort?
+
+**4. Welke keuzes zijn gemaakt?**
+Eerlijk zijn over de grenzen. Een fingerprint vangt ongelukken en verwisselingen, maar is **geen beveiliging**: wie een snapshot vervalst, kan hem ook consistent maken. Dat staat in de ADR.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Twee mutanten overleefden eerst:
+- **S16** ("sla de timer↔event-controle over"): mijn negatieve test raakte een andere controle eerder.
+- **S23** ("bij het vrijgeven van trace-entries ook de nieuwste weggooien"): `TimeTravel` maakt snapshots altijd *vóór* het vrijgeven.
+
+Voor beide kwam er een gerichte test bij.
+
+**6. Hoe hebben we het getest?**
+✅ 34 afwijzingstests, zoals verkeerde versie, andere seed, ontbrekende node, timer van een andere node, alles-nul random-toestand, events in de verkeerde volgorde, een vervalst bericht, te diepe nesting, en een prefix van een andere run. Elke test controleert ook het exacte foutpad.
+
+**7. Wat heb ik hiervan geleerd?**
+Validatie gaat over *samenhang*, niet alleen over vorm. En een beveiligingsclaim moet je precies afbakenen.
+
+**8. Belangrijkste begrippen**
+- **Untrusted input:** invoer waarvan je niet zeker weet of hij klopt.
+- **Consistentiecontrole:** nagaan of losse delen van data bij elkaar passen.
+- **Integriteit vs. authenticiteit:** "klopt het intern?" is iets anders dan "komt het echt van de bron?".
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom controleren we de diepte van een object *zonder* recursie?
+2. Waarom is een fingerprint geen bescherming tegen een vervalste snapshot?
+
+### CP3.4 — Keyframes, binair zoeken en de trace als cache
+
+**1. Wat hebben we gebouwd?**
+`TimeTravel` maakt elke K stappen een snapshot (een **keyframe**, net als bij video). `seek(n)` springt naar stap n. `regenerate(a, b)` bouwt elk stuk trace opnieuw op, met de originele entry-nummers.
+
+**2. Waarom is dit nodig?**
+Een tijdlijn moet snel kunnen springen, en lange runs passen niet volledig in het geheugen.
+
+**3. Hoe werkt het?**
+`seek(n)` zoekt met **binair zoeken** het laatste keyframe ≤ n. Dat kost log₂(aantal keyframes) stappen: bij 1.563 keyframes ±11 vergelijkingen. Daarna herstelt het dat keyframe en voert het **minder dan K stappen** opnieuw uit.
+
+Omdat de simulatie deterministisch is, hoef je de trace niet te bewaren: je kunt hem uit keyframes **exact opnieuw berekenen**. De trace wordt zo een *cache*.
+
+**4. Welke keuzes zijn gemaakt?**
+K telt stappen, want alleen stappen zijn hervatbaar. Een trace die midden in een run begint (een *segment*), houdt absolute nummers aan, zodat `cause`-verwijzingen blijven kloppen.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Mijn eerste "burst"-test (één stap = honderden entries) maakte ±25.000 stappen en sprong daarna naar *elke* stap. Dat is kwadratisch werk, en hij draaide minutenlang. Een kleinere variant (12 stappen van elk ≥ 300 entries) bewijst hetzelfde in milliseconden.
+
+**6. Hoe hebben we het getest?**
+✅ `seek(n)` geeft exact dezelfde snapshot als een ononderbroken run tot stap n, voor K = 1, 2, 7 en 64. ✅ De antwoorden zijn gelijk voor elk interval. ✅ Er worden nooit meer dan K−1 stappen opnieuw uitgevoerd, ook als één stap honderden entries oplevert. ✅ Opnieuw berekende stukken trace zijn byte-identiek, met dezelfde nummers.
+
+**7. Wat heb ik hiervan geleerd?**
+Determinisme maakt opslaan optioneel: wat je exact opnieuw kunt berekenen, hoef je niet te bewaren.
+
+**8. Belangrijkste begrippen**
+- **Keyframe:** een volledig opgeslagen tussenstand, waartussen je opnieuw berekent.
+- **Binair zoeken:** zoeken in een gesorteerde lijst door steeds te halveren (O(log n)).
+- **Tijd-geheugen-afweging:** meer opslaan maakt sneller, maar kost geheugen.
+- **Time-travel debugging:** terug in de tijd kunnen kijken in een programma.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom moet K in stappen geteld worden en niet in entries?
+2. Hoe weet `regenerate` welke nummers de nieuwe entries moeten krijgen?
+3. Kies met de benchmarktabel een K voor een interface die binnen 5 ms moet springen en hooguit 10 MB aan keyframes mag gebruiken.
+
+### CP3.5 — TraceIndex: elke entry inspecteren
+
+**1. Wat hebben we gebouwd?**
+Het losse pakket `@faultlab/trace` met `TraceIndex`. Voor elke entry geeft het: de toestand van alle nodes (inclusief de entry waar die vandaan komt en de lopende timers), de berichten onderweg, de partitie en linkfouten, open overtredingen, en bij welke stap de entry hoort. Daarnaast markeringen en oorzaak-gevolgketens, vooruit en achteruit.
+
+**2. Waarom is dit nodig?**
+De CP2.5-viewer begon voor elk beeld opnieuw bij entry #0. De echte interface heeft snelle, exacte inspectie nodig, en een eigen pakket houdt het lezen van traces gescheiden van het uitvoeren.
+
+**3. Hoe werkt het?**
+Elke C entries wordt de toestand gekopieerd (een *checkpoint*). Voor entry i neem je het dichtstbijzijnde checkpoint ≤ i en pas je hooguit C−1 entries toe. Gevolgen vind je door de `cause`-pijlen om te keren.
+
+**4. Welke keuzes zijn gemaakt?**
+Het pakket importeert alleen *types* van de engine (afgedwongen door een architectuurtest). Wat niet in de trace staat (random-toestanden, volgnummers, invariant-history), wordt **niet** gereconstrueerd. Daarvoor heb je een engine-snapshot nodig. Onvolledige traces worden geweigerd in plaats van geraden.
+
+**5. Welke problemen kwamen we tegen?**
+✅ De test "frames zijn diep bevroren" faalde: drie soorten records binnen een frame waren niet bevroren. Opgelost.
+
+✅ Mutant S22 (checkpoint ná de entry in plaats van ervóór) overleeft. Eindstand van de mutatietests: **22 van 23 gevangen, S22 is equivalent.** Wat "equivalent" hier precies betekent, moet je zorgvuldig zeggen:
+- *Definitie:* equivalent ten opzichte van het **publieke gedrag** van de TraceIndex, dus wat de methodes teruggeven (`frameAt`, `lastFrameCost`, stappen, markeringen, oorzaken) voor elke geldige trace.
+- *Waarom:* in de mutant wordt de entry op de checkpointpositie twee keer toegepast. Dat maakt niets uit, omdat elke update **idempotent** is: `apply(apply(W, e), e) = apply(W, e)`. Het gaat telkens om "zet deze waarde" of "voeg toe aan / haal uit een map", en dat nog eens doen verandert niets.
+- *Wat hem wél zou kunnen vangen:* een test die naar de *interne* checkpoints, het geheugen of de tijd kijkt, of een toekomstige update die niet idempotent is (bijvoorbeeld een teller). Daarom staat "apply is idempotent" nu als expliciete aanname in de code.
+
+Het is dus níét zo dat "geen enkele denkbare test" hem kan vangen. Alleen geen test van het *afgesproken observeerbare gedrag*.
+
+**6. Hoe hebben we het getest?**
+✅ Na **elke** stap is de reconstructie gelijk aan de gezaghebbende snapshot van de engine, voor 60 willekeurige experimenten × vier intervallen. ✅ Elk interval geeft hetzelfde als volledig opnieuw scannen. ✅ Er worden nooit meer dan C−1 entries toegepast. ✅ "Gevolgen" is precies het omgekeerde van "oorzaak". ✅ De CP2.5-demo gebruikt nu de TraceIndex, en zijn 10 unit- en 6 Playwright-tests slagen ongewijzigd.
+
+**7. Wat heb ik hiervan geleerd?**
+"Bekijken" en "uitvoeren" zijn verschillende verantwoordelijkheden, en verdienen elk hun eigen pakket.
+
+**8. Belangrijkste begrippen**
+- **Checkpointing:** af en toe de volledige toestand opslaan, en daartussen bijwerken.
+- **Reverse index:** een index die "wie verwijst naar mij?" beantwoordt.
+- **Equivalente mutant:** een codewijziging die het gedrag niet verandert.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan de TraceIndex de random-toestanden niet reconstrueren?
+2. Leg precies uit ten opzichte van wélk gedrag mutant S22 equivalent is, waarom idempotentie daarvoor nodig is, en noem een test die hem tóch zou vangen.
+
+### CP3.6 — Geheugen en prestaties meten (en een meetfout)
+
+**1. Wat hebben we gebouwd?**
+Metingen van de tijd voor vastleggen en herstellen, de snapshotgrootte, keyframes, springen, opnieuw berekenen en de TraceIndex. De volledige tabellen staan in `docs/TEST_STRATEGY.md` (CP3).
+
+**2. Waarom is dit nodig?**
+Je kunt pas een goede K kiezen als je de afweging tussen tijd en geheugen kent. En de opdracht was: structural sharing *meten*, niet aannemen.
+
+**3. Hoe werkt het?**
+✅ Belangrijkste resultaten (100.000 stappen, 287.533 entries):
+- een snapshot vastleggen kost 0,17 ms en levert ±10 kB JSON op;
+- herstellen kost 0,09–0,45 ms;
+- de volledige trace kost 78 MB, terwijl keyframes elke 1.024 stappen maar 2,1 MB kosten;
+- springen duurt in de mediaan 0,3–9 ms, afhankelijk van K.
+
+**4. Welke keuzes zijn gemaakt?**
+Nog niets geoptimaliseerd. De TraceIndex blijkt ±64–83 MB extra te kosten, ongeveer evenveel als de trace zelf. Dat is te veel voor een browser-app, dus **PERF-3** wordt onderzocht *vóórdat* de prestatiegevoelige frontend gebouwd wordt (niet pas in CP9). De sprongen van soms meer dan 100 ms zijn vastgelegd als **PERF-4**. Vóór de echte tijdlijn moeten we begrijpen: het geheugen van de TraceIndex en van keyframes, de springtijden en uitschieters, de responsiviteit van de browser, het gedrag van de garbage collector, en herhaald scrubben. Eerst meten, dan pas veranderen. PERF-1 en PERF-2 blijven apart open.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Mijn eerste geheugenmeting was fout.** Die gaf *negatieve* waarden, omdat ik "geheugen na − geheugen vóór" mat terwijl er ondertussen ander afval werd opgeruimd. De nieuwe methode: bouw het object, meet met het object nog in leven, laat het los, ruim op, en meet opnieuw. Het verschil is wat dat object vasthoudt (mediaan van 3). ✅ Daarmee bleek dat keyframes **geen** oude trace vasthouden (2,1 MB tegenover 78 MB). 💭 Structural sharing gaf in deze test geen meetbaar verschil (0,03 MB in beide gevallen), omdat de states van dit protocol heel klein zijn. Dat het voordeel bij grote states echt optreedt, is dus nog niet bewezen. 💭 Sommige sprongen duurden soms meer dan 100 ms; de oorzaak is niet gemeten (mogelijk garbage collection).
+
+**6. Hoe hebben we het getest?**
+Herhaalde metingen met mediaan, minimum en maximum, en geforceerde garbage collection voor het geheugen.
+
+**7. Wat heb ik hiervan geleerd?**
+Een meetmethode kan zelf een bug hebben. Onlogische uitkomsten, zoals negatief geheugengebruik, zijn een signaal om de *methode* te controleren, niet om de cijfers te geloven.
+
+**8. Belangrijkste begrippen**
+- **Retained memory:** geheugen dat een object vasthoudt zolang het bestaat.
+- **Structural sharing:** onveranderde delen delen in plaats van kopiëren.
+- **Mediaan:** het middelste meetresultaat, minder gevoelig voor uitschieters.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom gaf "na − vóór" negatieve geheugenwaarden, en waarom werkt "levend − losgelaten" wél?
+2. Waarom bewijst deze meting niet dat structural sharing geheugen bespaart?
+
+### CP3.7 — Drie soorten versies
+
+**1. Wat hebben we gebouwd?** Een heldere scheiding (SEMANTICS §16) tussen:
+- de **engineversie** (`0.3.0-cp2`), die bepaalt welke trace een configuratie oplevert;
+- het **traceformaat**, de vorm van de entries, die nu nog aan de engineversie vastzit;
+- het **snapshotformaat** (`faultlab-snapshot/1`), de vorm van een snapshot.
+
+**2. Waarom is dit nodig?** CP3 voegde veel toe, maar veranderde geen enkele trace. Zou de engineversie omhoog gaan, dan moesten alle golden fingerprints opnieuw, zonder dat er gedrag veranderd is. Dan zeggen die tests niets meer.
+
+**3. Hoe werkt het?** De engineversie verandert alleen als dezelfde invoer een andere trace kan opleveren. Een nieuw soort bestand (de snapshot) krijgt zijn eigen versie.
+
+**4. Welke keuzes zijn gemaakt?** De naam `-cp2` is verwarrend: hij betekent "gedrag voor het laatst veranderd in CP2", niet "gebouwd in CP2". Een betere naamgeving staat op de lijst voor een latere architectuurreview, en is bewust nu niet aangepast.
+
+**5. Welke problemen kwamen we tegen?** Geen bug, wel een inzicht: versienummers zijn óók een contract, net als een API.
+
+**6. Hoe hebben we het getest?** ✅ Alle golden fingerprints en beide opgeslagen tegenvoorbeelden slagen ongewijzigd met `0.3.0-cp2`.
+
+**7. Wat heb ik hiervan geleerd?** Verhoog een versie omdat de *betekenis* verandert, niet omdat er nieuwe code bij komt.
+
+**8. Belangrijkste begrippen**
+- **Semantische versie:** een versie die aangeeft of gedrag of een formaat veranderd is.
+- **Schemaversie:** de versie van een dataformaat.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom bleef de engineversie in CP3 gelijk, terwijl er een nieuw snapshotformaat bij kwam?
+2. Wat zou er misgaan met de golden fingerprints als je bij elk checkpoint de engineversie verhoogt?
+
+### CP3 — Bekende beperkingen
+
+- Vertakken (verdergaan met een *ander* faultplan) kan nog niet: dat zou de regel "faults gaan vóór op hetzelfde tijdstip" breken. Dit is uitgesteld, samen met interactieve fault-injectie.
+- Snapshot-validatie is geen beveiliging tegen vervalsing (gedocumenteerd).
+- De TraceIndex verdubbelt ongeveer het geheugen (PERF-3), en sommige sprongen hebben trage uitschieters (PERF-4, oorzaak niet gemeten). Beide moeten begrepen zijn vóór de echte tijdlijn.
+- De TraceIndex werkt alleen op volledige traces, niet op segmenten.
+- npm 11 meldt dat het installatiescript van `fsevents` (een optionele macOS-dependency van Playwright) niet is goedgekeurd. Het is ook niet nodig, dus bewust niet goedgekeurd.

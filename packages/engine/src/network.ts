@@ -1,5 +1,5 @@
 import type { NodeId } from './protocol';
-import type { RandomSource } from './random';
+import type { Xoshiro128, Xoshiro128State } from './random';
 import type { Duration, VirtualTime } from './time';
 
 export interface LatencyRange {
@@ -76,11 +76,11 @@ interface ActivePartition {
  */
 export class VirtualNetwork {
   readonly #config: NetworkConfig;
-  readonly #random: RandomSource;
+  readonly #random: Xoshiro128;
   readonly #links = new Map<string, ActiveLink>();
   #partition: ActivePartition | null = null;
 
-  constructor(config: NetworkConfig, random: RandomSource) {
+  constructor(config: NetworkConfig, random: Xoshiro128) {
     this.#config = config;
     this.#random = random;
   }
@@ -90,6 +90,11 @@ export class VirtualNetwork {
     const groupOf = new Map<NodeId, number>();
     groups.forEach((group, g) => group.forEach((id) => groupOf.set(id, g)));
     this.#partition = { groups, groupOf, since };
+  }
+
+  /** State of the network's random stream (for snapshots). */
+  randomState(): Xoshiro128State {
+    return this.#random.getState();
   }
 
   heal(): void {

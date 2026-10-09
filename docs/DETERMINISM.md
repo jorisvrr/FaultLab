@@ -24,10 +24,11 @@ A program is deterministic if every value it computes is a function of its input
 | 12 | **Faults from outside the inputs** (CP1) | Faults exist only as the config's fault plan, recorded in `run.start`; protocols have no fault API; fault events are ordinary scheduled events in the same total order. | Fault replay property (random plans, identical traces); fault golden fingerprint |
 | 13 | **Randomness consumed by faults** (CP1) | Loss and extra delay draw from the network stream only while a condition is active; fault-free runs draw exactly as in CP0. | CP0-projection test reproduces the CP0 golden fingerprint |
 | 15 | **Invariant checking** (CP2) | Invariants see only a deeply frozen view and frozen step entries; their outputs (verdict, JSON history) are validated by the engine; evaluation order is fixed (configuration order); checker exceptions become trace entries; invariants are recorded in `run.start`. | Graph-walk immutability test; contained mutation attempts leave the trace prefix identical; checked vs. unchecked runs identical apart from `run.start` |
+| 17 | **Snapshots and restore** (CP3) | Restore rebuilds every map in its original insertion order, keeps original sequence numbers and absolute entry indices, and re-derives (never stores) derived indexes; snapshots are taken only at step boundaries. | Metamorphic property (random k, protocols, fault plans, both policies); idempotence; snapshot-every-step; golden fingerprints unchanged in CP3 |
 | 16 | **Property-test seeds** (CP2) | fast-check uses a fixed global seed, so the *test suite itself* is deterministic; random seeds are opt-in via `npm run test:explore`. | Suite run three times with identical results |
 | 14 | **Heap maintenance** (CP1) | Compaction rebuilds the heap, but with a strict total order every valid heap pops identically, so the trace is unaffected. | Model-based compaction property; golden fingerprints |
 
-Given rows 1–16, each step is a pure function of (scheduler state, node runtimes, network conditions, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
+Given rows 1–17, each step is a pure function of (scheduler state, node runtimes, network conditions, PRNG states, counters). The initial values of those are pure functions of the configuration. By induction over steps, the whole trace is a pure function of the configuration.
 
 ## What determinism does *not* cover (yet)
 

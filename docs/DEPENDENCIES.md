@@ -14,6 +14,10 @@ Rule: a dependency must solve a problem we actually have, better than ~100 lines
 | `fast-check` | ^4.10.2 | Property-based testing with shrinking. Essential for a scheduler/PRNG/determinism suite, and since CP2 for fault-space exploration: generating fault plans, shrinking failures to minimal counterexamples (`test/explore.ts`). Seeded globally for a deterministic suite. | Hand-rolled random tests (no shrinking), jsverify (unmaintained) |
 | `@types/node` | ^24 | Types for `node:fs`/`node:path` in architecture tests only. **Not** visible to engine source (`types: []`). | — |
 
+## `@faultlab/trace` (CP3)
+
+No runtime dependencies. It imports only TypeScript **types** from `@faultlab/engine` (declared as a dev dependency); an architecture test enforces this.
+
 ## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
 
 | Package | Version | License | Why |

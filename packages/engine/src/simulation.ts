@@ -1,4 +1,5 @@
 import { resolveConfig, type ResolvedConfig, type SimulationConfig } from './config';
+import { entryFingerprint, SNAPSHOT_FORMAT, SnapshotError, validateSnapshot, type SimulationSnapshot, type SnapshotEvent, type StepCount } from './snapshot';
 import { createNodeContext, type Effect, type StorageWrites } from './context';
 import { EngineInvariantError } from './errors';
 import type { Fault } from './faults';
@@ -7,10 +8,10 @@ import { toFrozenJson, type JsonValue } from './json';
 import { VirtualNetwork, type DropReason } from './network';
 import { NodeRuntime, type NodeStatus } from './node';
 import type { FiredTimer, IncomingMessage, MessageId, NodeContext, NodeId } from './protocol';
-import { deriveStream } from './random';
+import { deriveStream, Xoshiro128 } from './random';
 import { EventScheduler } from './scheduler';
 import type { VirtualTime } from './time';
-import { EventTrace, type StopReason, type TraceEntry } from './trace';
+import { EventTrace, type EntryIndex, type RunStartEntry, type StopReason, type TraceEntry } from './trace';
 import { ENGINE_VERSION } from './version';
 
 /** Events that can sit in the scheduler queue. `cause` is the trace index that scheduled them. */
@@ -36,6 +37,8 @@ interface Envelope {
 }
 
 export interface RunResult {
+  /** Absolute index of `trace[0]`: 0 for a full trace, > 0 for a run restored without its prefix. */
+  readonly traceStart: EntryIndex;
   readonly reason: StopReason;
   readonly eventsProcessed: number;
   readonly pendingEvents: number;
@@ -59,9 +62,13 @@ export interface NodeInfo {
  */
 export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = JsonValue> {
   readonly config: ResolvedConfig<S, M>;
-  readonly #scheduler = new EventScheduler<SimEvent>();
-  readonly #trace = new EventTrace();
-  readonly #network: VirtualNetwork;
+  #scheduler = new EventScheduler<SimEvent>();
+  #trace = new EventTrace();
+  #network: VirtualNetwork;
+  /** The run.start entry: every input of the experiment (kept even when the trace is a segment). */
+  readonly #inputs: RunStartEntry;
+  /** Fingerprint of the entry before `firstIndex` when restored without a prefix. */
+  #lastEntryBeforeSegment = '';
   readonly #nodes = new Map<NodeId, NodeRuntime>();
   /**
    * In-flight message index (CP2): exactly the messages with a pending `message.deliver` event,
@@ -79,7 +86,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     this.#network = new VirtualNetwork(network, deriveStream(seed, 'network'));
     this.#monitor = invariants.length === 0 ? null : new InvariantMonitor(invariants, invariantPolicy);
 
-    const runStart = this.#trace.append({
+    const runStart: EntryIndex = this.#trace.append({
       kind: 'run.start',
       time: 0,
       cause: null,
@@ -95,6 +102,7 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
       invariantPolicy,
     });
 
+    this.#inputs = this.#trace.at(runStart) as RunStartEntry;
     for (const id of nodes) {
       const peers = Object.freeze(nodes.filter((other) => other !== id));
       this.#nodes.set(id, new NodeRuntime(id, peers, deriveStream(seed, `node:${id}`)));
@@ -115,6 +123,30 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
 
   get eventsProcessed(): number {
     return this.#eventsProcessed;
+  }
+
+  /** Completed simulation steps. Identical to `eventsProcessed`: one step dispatches one event. */
+  get stepsCompleted(): StepCount {
+    return this.#eventsProcessed;
+  }
+
+  /** Absolute index of the first retained trace entry (0 unless restored without a prefix). */
+  get traceStart(): EntryIndex {
+    return this.#trace.firstIndex;
+  }
+
+  /** Absolute index the next trace entry will receive. */
+  get traceLength(): EntryIndex {
+    return this.#trace.length;
+  }
+
+  /**
+   * Release retained trace entries before `index` to bound memory in long runs. Absolute indices
+   * of later entries are unaffected; released entries can be regenerated from keyframes. Has no
+   * influence on execution (the engine never reads entries from earlier steps).
+   */
+  releaseTraceBefore(index: EntryIndex): void {
+    this.#trace.releaseBefore(index);
   }
 
   get pendingEvents(): number {
@@ -328,12 +360,124 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
   run(): RunResult {
     while (this.#stopReason === null) this.step();
     return {
+      traceStart: this.#trace.firstIndex,
       reason: this.#stopReason,
       eventsProcessed: this.#eventsProcessed,
       pendingEvents: this.#scheduler.pendingCount,
       finalTime: this.#scheduler.now,
       trace: this.#trace.snapshot(),
     };
+  }
+
+  /**
+   * Capture the complete execution state at the current step boundary (ADR-0015). The API is
+   * synchronous, so a snapshot can never observe a half-finished step. The result is deeply
+   * frozen JSON that shares unchanged states and payloads with the live run (structural sharing).
+   */
+  snapshot(): SimulationSnapshot {
+    const length = this.#trace.length;
+    const last = this.#trace.at(length - 1);
+    const { partition, links } = this.#network.conditions();
+    const raw = {
+      format: SNAPSHOT_FORMAT,
+      engineVersion: ENGINE_VERSION,
+      inputs: this.#inputs,
+      position: {
+        stepsCompleted: this.#eventsProcessed,
+        traceLength: length,
+        time: this.#scheduler.now,
+        lastEntryFingerprint: last === undefined ? this.#lastEntryBeforeSegment : entryFingerprint(last),
+      },
+      stopReason: this.#stopReason,
+      scheduler: {
+        nextSeq: this.#scheduler.nextSeq,
+        events: this.#scheduler.liveEvents().map(({ time, seq, event }) => ({ time, seq, event: toSnapshotEvent(event) })),
+      },
+      network: { random: this.#network.randomState(), partition, links },
+      nodes: [...this.#nodes.values()].map((node) => ({
+        id: node.id,
+        status: node.status,
+        incarnation: node.incarnation,
+        crashedAt: node.crashedAt,
+        stateEntry: node.stateEntry,
+        state: node.state === undefined ? null : { value: node.state },
+        storage: [...node.storage],
+        messagesSent: node.messagesSent,
+        timersSet: node.timersSet,
+        timers: [...node.timers],
+        random: node.random.getState(),
+      })),
+      invariants: this.#monitor?.exportState() ?? null,
+    };
+    return toFrozenJson(raw, 'snapshot') as unknown as SimulationSnapshot;
+  }
+
+  /**
+   * Rebuild a simulation from a snapshot (ADR-0015, ADR-0016). `snapshot` is treated as
+   * UNTRUSTED and validated against `config` (see snapshot.ts); invalid input throws SnapshotError.
+   *
+   * - With `tracePrefix` (the trace up to the snapshot), the restored run holds the full trace.
+   * - Without it, the run holds a trace SEGMENT starting at the snapshot's absolute position, so
+   *   every new entry keeps the index (and causal references) of an uninterrupted run.
+   */
+  static restore<S extends JsonValue, M extends JsonValue>(
+    config: SimulationConfig<S, M>,
+    snapshot: unknown,
+    options: { readonly tracePrefix?: readonly TraceEntry[] } = {},
+  ): Simulation<S, M> {
+    const sim = new Simulation(config);
+    const prefix = options.tracePrefix ?? null;
+    if (prefix !== null && (prefix[0]?.kind !== 'run.start' || entryFingerprint(prefix[0]) !== entryFingerprint(sim.#inputs))) {
+      throw new SnapshotError('tracePrefix', 'does not start with the run.start of this configuration');
+    }
+    const valid = validateSnapshot(snapshot, sim.config as unknown as ResolvedConfig<JsonValue, JsonValue>, sim.#inputs, prefix);
+    sim.#load(valid, prefix);
+    return sim;
+  }
+
+  #load(snap: SimulationSnapshot, prefix: readonly TraceEntry[] | null): void {
+    const { position } = snap;
+    this.#trace = prefix === null ? new EventTrace(position.traceLength) : new EventTrace(0, prefix);
+    this.#lastEntryBeforeSegment = position.lastEntryFingerprint;
+    const faults = new Map(this.config.faults.map((fault) => [fault.id, fault]));
+    this.#scheduler = EventScheduler.restore<SimEvent>({
+      now: position.time,
+      nextSeq: snap.scheduler.nextSeq,
+      events: snap.scheduler.events.map(({ time, seq, event }) => ({ time, seq, event: fromSnapshotEvent(event, faults) })),
+    });
+    this.#network = new VirtualNetwork(this.config.network, Xoshiro128.fromState(snap.network.random));
+    if (snap.network.partition !== null) this.#network.partition(snap.network.partition.groups, snap.network.partition.since);
+    for (const link of snap.network.links) this.#network.setLink(link.from, link.to, link, link.since);
+
+    this.#nodes.clear();
+    for (const saved of snap.nodes) {
+      const peers = Object.freeze(this.config.nodes.filter((other) => other !== saved.id));
+      const node = new NodeRuntime(saved.id, peers, Xoshiro128.fromState(saved.random));
+      node.status = saved.status;
+      node.incarnation = saved.incarnation;
+      node.crashedAt = saved.crashedAt;
+      node.stateEntry = saved.stateEntry;
+      node.state = saved.state === null ? undefined : saved.state.value;
+      node.messagesSent = saved.messagesSent;
+      node.timersSet = saved.timersSet;
+      for (const [key, value] of saved.storage) node.storage.set(key, value);
+      for (const [timerId, seq] of saved.timers) node.timers.set(timerId, seq);
+      this.#nodes.set(saved.id, node);
+    }
+
+    // The in-flight index is derived, not stored: exactly the pending deliveries, in send order.
+    this.#inFlight.clear();
+    const deliveries = snap.scheduler.events
+      .flatMap(({ time, event }) => (event.kind === 'message.deliver' ? [{ time, event }] : []))
+      .sort((a, b) => a.event.cause - b.event.cause);
+    for (const { time, event } of deliveries) {
+      const { id, from, to, payload, sentAt } = event.message;
+      this.#inFlight.set(id, Object.freeze({ id, from, to, payload, sentAt, deliverAt: time, sendIndex: event.cause }));
+    }
+
+    this.#eventsProcessed = position.stepsCompleted;
+    this.#stopReason = snap.stopReason;
+    if (this.#monitor !== null && snap.invariants !== null) this.#monitor.importState(snap.invariants);
   }
 
   #stop(reason: StopReason): false {
@@ -656,5 +800,29 @@ function describeError(error: unknown): string {
     return `non-Error thrown: ${String(error)}`;
   } catch {
     return 'non-Error thrown';
+  }
+}
+
+function toSnapshotEvent(event: SimEvent): SnapshotEvent {
+  switch (event.kind) {
+    case 'fault':
+      return { kind: 'fault', faultId: event.fault.id, cause: event.cause };
+    case 'message.deliver': {
+      const { id, from, to, payload, sentAt } = event.message;
+      return { kind: 'message.deliver', message: { id, from, to, payload, sentAt }, cause: event.cause };
+    }
+    default:
+      return event;
+  }
+}
+
+function fromSnapshotEvent(event: SnapshotEvent, faults: ReadonlyMap<string, Fault>): SimEvent {
+  switch (event.kind) {
+    case 'fault':
+      return { kind: 'fault', fault: faults.get(event.faultId) as Fault, cause: event.cause };
+    case 'timer.fire':
+      return { ...event, timer: Object.freeze({ ...event.timer }) };
+    default:
+      return event;
   }
 }

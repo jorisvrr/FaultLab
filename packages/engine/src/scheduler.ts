@@ -68,6 +68,35 @@ export class EventScheduler<E> {
     return seq;
   }
 
+  /**
+   * Rebuild a scheduler from exported state (CP3 snapshots). `events` must be the live events
+   * with their ORIGINAL sequence numbers; the clock is set to `now` and the next sequence number
+   * to `nextSeq`, so future scheduling assigns exactly the numbers an uninterrupted run would.
+   * Validation of untrusted input happens in snapshot.ts before this is called.
+   */
+  static restore<E>(
+    state: { readonly now: VirtualTime; readonly nextSeq: EventSeq; readonly events: readonly ScheduledEvent<E>[] },
+    options: { readonly compactionThreshold?: number } = {},
+  ): EventScheduler<E> {
+    const scheduler = new EventScheduler<E>(options);
+    scheduler.#clock.advanceTo(state.now);
+    for (const scheduled of state.events) {
+      if (scheduled.seq >= state.nextSeq || scheduler.#live.has(scheduled.seq)) {
+        throw new EngineInvariantError(`restored event seq ${scheduled.seq} is invalid`);
+      }
+      if (scheduled.time < state.now) throw new EngineInvariantError(`restored event at ${scheduled.time} is before now`);
+      scheduler.#heap.push(scheduled);
+      scheduler.#live.add(scheduled.seq);
+    }
+    scheduler.#nextSeq = state.nextSeq;
+    return scheduler;
+  }
+
+  /** The sequence number the next scheduled event will receive. */
+  get nextSeq(): EventSeq {
+    return this.#nextSeq;
+  }
+
   /** Returns true if the event was pending and is now cancelled; false if it already ran or was cancelled. */
   cancel(seq: EventSeq): boolean {
     if (!this.#live.delete(seq)) return false;

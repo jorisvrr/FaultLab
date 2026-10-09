@@ -19,6 +19,8 @@
 | Fault exploration | fast-check + greedy minimiser | Random fault plans → violation → shrink → 1-minimal → replay; stored counterexample fixtures replayed exactly | `explore.ts`, `exploration.test.ts`, `counterexamples.test.ts` |
 | Protocol safety | Vitest + fast-check | Naive leader: healthy convergence (no startup false positives), crash/recover property, split brain, history-only violations, pure-function unit tests of invariants | `naive-leader.test.ts` |
 | Index consistency | fast-check | In-flight index = scheduler = trace-derived set after every step | `inflight.test.ts` |
+| Snapshots and time travel | fast-check + Vitest | Metamorphic restore equivalence, idempotence, JSON round trips, untrusted-input rejection, exact seeking, regeneration with absolute indices | `snapshot.test.ts`, `time-travel.test.ts` |
+| Trace reconstruction | fast-check + Vitest | TraceIndex = engine snapshot after every step; step boundaries = real `step()` calls; cost bound; causality | `packages/trace/test/` |
 | Trace oracle | Plain TypeScript, no engine code | An independent re-derivation of lifecycle, timer, message and partition semantics from the trace alone; returns every violated rule. A bug would have to be written twice, the same way, to pass | `test/invariants.ts`, used by lifecycle, network and property tests |
 | Reference vectors | C reference, published FNV vectors | PRNG and hash are bit-exact implementations of their algorithms | `random.test.ts`, `hash.test.ts`, `test/reference/xoshiro128.c` |
 | Acceptance | Vitest | CP0 and CP1 criteria end-to-end with exact expected counts, times, orderings and ids | `simulation`, `lifecycle`, `network-faults` tests |
@@ -95,6 +97,64 @@ npm run check      # typecheck (src with no DOM/Node libs, tests with Node types
 npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
+
+## CP3 results
+
+**Tests:** engine 371 passing (+2 fixture writers), `@faultlab/trace` 16, demo 10, Playwright 6, all green; typechecks and the demo build pass. Coverage: engine 98.9 % lines / 96.1 % branches (`snapshot.ts` 100 / 97.8, `time-travel.ts` 100 / 89.7); trace 100 % lines / 96.6 % branches.
+
+**Determinism:** all CP0–CP2 golden fingerprints and both stored counterexamples pass **unchanged** (no golden or fixture file was modified; `ENGINE_VERSION` remains `0.3.0-cp2` because no trace changed).
+
+**Correctness tests added:** metamorphic snapshot/restore over random protocols × fault plans × invariant policies × snapshot points, with and without trace prefix, through JSON (120 runs); idempotence (80); snapshot-after-every-step (30); independence; immutability; counterexamples replayed from mid-run snapshots; 34 malformed/incompatible-snapshot rejections; exact seek vs. uninterrupted runs for K ∈ {1, 2, 7, 64} (60 runs); interval independence; burst-step bound; regeneration over random ranges (60); keyframes-only reconstruction; TraceIndex vs. the engine's own snapshot after **every** step (60 random experiments × checkpoint intervals), step boundaries vs. real `step()` calls (60), cost bound, markers, inverse causality.
+
+### CP3 mutation pass (23 mutants)
+
+| Mutant | Result |
+|---|---|
+| S1 `nextSeq` not restored · S2 timers reversed · S3 node PRNG not restored · S4 network PRNG not restored · S5 message counter not restored · S6 `crashedAt` · S7 `stateEntry` · S8 invariant monitor · S9 links reversed · S10 in-flight index not rebuilt · S11 stop reason · S12 incarnation · S14 segment off by one · S15 no last-entry check · S17 out-of-order events accepted · S18 seek uses a later keyframe · S19 regenerate loses `run.end` · S20 TraceIndex keeps timers after crash · S21 send-time drops counted as steps | caught (1–5 failing tests each) |
+| S13 storage restored in reverse order | **survived** at first: every fixture protocol stores ≤ 1 key per node. New multi-key test → caught |
+| S16 timer↔event consistency check skipped | **survived** at first: the negative test hit a different check. New "timer without event" test → caught |
+| S23 trace release drops the newest entry | **survived** at first: `TimeTravel` snapshots before releasing. New "snapshot after release" test → caught |
+| S22 TraceIndex checkpoint taken after its entry | survives: an **equivalent mutant** with respect to the public TraceIndex API (definition below) |
+
+**Final result: 22 of 23 mutants detected; S22 classified as equivalent.** The tests added for S13, S16 and S23 stay in the suite as regression tests.
+
+**Why S22 is equivalent, precisely.** *Equivalence is defined relative to the TraceIndex's observable behaviour: the return values of its public methods (`frameAt`, `lastFrameCost`, `steps`, `stepOf`, `markers`, causality and navigation methods) for every valid trace and argument.* The mutant stores checkpoint c as the state *after* applying entry `c·C` instead of before. `frameAt(i)` always uses checkpoint `⌊i / C⌋`, so `i ≥ c·C`, and then applies entries `c·C … i`; under the mutant, entry `c·C` is therefore applied **twice**. That is unobservable because `apply` is **idempotent per entry**, i.e. `apply(apply(W, e), e) = apply(W, e)` for every entry kind in the current semantics:
+
+- assignments (status, incarnation, state, `stateEntry`, partition, `stopped`) set the same values again;
+- map writes and deletes (`timers`, `inFlight`, `links`, `open`) are set/delete operations, so repeating them changes nothing; `link.fault` deletes then re-inserts, ending in the same order;
+- the storage merge and deletions, and a crash clearing timers, end in the same state.
+
+`lastFrameCost` counts loop iterations from the checkpoint and is identical; the other methods do not use checkpoints at all. **What could detect it:** a test inspecting private checkpoint contents, memory or timing (outside the defined observable behaviour); or any future `apply` that is *not* idempotent (e.g. a counter of handled messages), which would turn S22 into a detectable mutant. Per-entry idempotence of `apply` is therefore a documented assumption of the TraceIndex.
+
+### CP3 benchmarks
+
+Workload: naive leader, 8 nodes, healthy network, 100 000 steps (287 533 entries); Apple-silicon laptop, Node 24. Times are medians (min/max where noted); memory is **retained** heap measured by dropping the object and forcing GC (median of 3).
+
+| Snapshot (end of run, 32 pending events) | |
+|---|---|
+| capture | 0.17 ms |
+| size as JSON | 9 980 bytes (inputs 401 bytes) |
+| restore with 287k-entry prefix / segment / from parsed JSON | 0.45 / 0.09 / 0.31 ms |
+| retained memory, shared vs. parsed copy | 0.03 MB / 0.03 MB (states here are tiny: structural sharing makes no measurable difference for this workload) |
+
+| Keyframe interval K (steps) | 64 | 256 | 1 024 | 4 096 |
+|---|---|---|---|---|
+| keyframes | 1 563 | 391 | 98 | 25 |
+| record time (plain run: 545 ms) | 730 ms | 582 ms | 530 ms | 526 ms |
+| retained memory, keyframes only | 33.0 MB | 8.3 MB | 2.1 MB | 0.5 MB |
+| seek median / max (40 targets) | 0.27 / 0.88 ms | 0.74 / 146 ms | 2.97 / 123 ms | 9.24 / 114 ms |
+| most steps re-executed (bound K − 1) | 63 | 251 | 979 | 4 040 |
+| regenerate 10 000 steps (28 750 entries) | 51 ms | 58 ms | 56 ms | 73 ms |
+
+Full trace for the same run: **78.3 MB** retained. At K = 1 024, keyframes cost ~21 KB each in memory (8.2 KB as JSON): keyframes-only recording does **not** retain historical data. The occasional 100+ ms seek maxima are not explained yet (tracked as **PERF-4**; GC pauses are a hypothesis only).
+
+| TraceIndex checkpoint interval C (entries) | 64 | 256 | 1 024 | 4 096 |
+|---|---|---|---|---|
+| build | 119 ms | 97 ms | 91 ms | 90 ms |
+| retained memory (on top of the 78 MB trace) | 82.6 MB | 69.1 MB | 65.3 MB | 64.3 MB |
+| `frameAt` median / max (200 queries) | 0.015 / 0.29 ms | 0.020 / 0.11 ms | 0.048 / 0.21 ms | 0.147 / 0.54 ms |
+
+The index roughly doubles memory: recorded as **PERF-3**, to be investigated **before** the performance-sensitive frontend integration (ROADMAP, performance gate).
 
 ## CP2.5 results (browser prototype)
 
