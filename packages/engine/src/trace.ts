@@ -1,5 +1,5 @@
 import type { Fault, FaultId, FaultType } from './faults';
-import { fnv1a32, toHex32 } from './hash';
+import { fnv1a32, FNV1A32_OFFSET, fnv1a32Update, toHex32 } from './hash';
 import { canonicalJson, type JsonValue } from './json';
 import type { DropReason, LatencyRange } from './network';
 import type { InvariantPolicy, InvariantRef } from './invariants';
@@ -392,6 +392,14 @@ export class EventTrace {
     return Object.freeze(this.#entries.slice(Math.max(0, start - this.#first)));
   }
 
+  /** Frozen copy of the retained entries in [from, to) (absolute indices; both must be retained). */
+  range(from: EntryIndex, to: EntryIndex): readonly TraceEntry[] {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < this.#first || to > this.length || from > to) {
+      throw new RangeError(`entries [${from}, ${to}) are not retained (retained: [${this.#first}, ${this.length}))`);
+    }
+    return Object.freeze(this.#entries.slice(from - this.#first, to - this.#first));
+  }
+
   /** A frozen copy of the retained entries; later appends do not affect it. */
   snapshot(): readonly TraceEntry[] {
     return Object.freeze(this.#entries.slice());
@@ -416,6 +424,34 @@ function deepFreeze<T>(value: T): T {
 /** Canonical serialisation of a trace. Two runs are identical iff these strings are equal. */
 export function serializeTrace(entries: readonly TraceEntry[]): string {
   return canonicalJson(entries as unknown as JsonValue);
+}
+
+/**
+ * Incremental trace fingerprint (CP5): feed entries in order, in any chunking, and `digest()`
+ * equals `fingerprintTrace` of all entries fed so far. It hashes the same canonical
+ * serialisation ("[" e0 "," e1 … "]") without keeping the entries, so a Worker can fingerprint a
+ * run it has already streamed away and released. Feeding must start at entry #0.
+ */
+export class TraceFingerprint {
+  #state = fnv1a32Update(FNV1A32_OFFSET, '[');
+  #count = 0;
+
+  /** Number of entries fed so far (= the absolute index the next entry must have). */
+  get count(): number {
+    return this.#count;
+  }
+
+  update(entries: readonly TraceEntry[]): void {
+    for (const entry of entries) {
+      if (entry.index !== this.#count) throw new RangeError(`fingerprint expected entry #${this.#count}, got #${entry.index}`);
+      this.#state = fnv1a32Update(this.#state, (this.#count === 0 ? '' : ',') + canonicalJson(entry as unknown as JsonValue));
+      this.#count++;
+    }
+  }
+
+  digest(): string {
+    return toHex32(fnv1a32Update(this.#state, ']'));
+  }
 }
 
 /** Short display fingerprint (FNV-1a 32). Use `serializeTrace` for actual equality checks. */

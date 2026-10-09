@@ -1,0 +1,22 @@
+{
+  "name": "@faultlab/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FaultLab's browser execution runtime: the versioned Worker message protocol, the time-sliced Worker core, determinism guards, and the main-thread client with flow control and a watchdog.",
+  "license": "MIT",
+  "author": "Joris van Rijn",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker-entry.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@faultlab/engine": "*",
+    "@faultlab/experiments": "*",
+    "@faultlab/trace": "*"
+  }
+}

@@ -79,3 +79,19 @@ Presentation rules that follow from CP4's semantics:
 2. **Liveness ≠ safety.** A missed deadline is a bounded-test result under stated assumptions; a disarmed check means "no expectation" (e.g. no majority), which must not look like success or failure.
 3. **Term lanes**: a per-term view (who campaigned, who voted for whom, who won, how long without a leader) is derivable from the entries above; it needs no extra engine data.
 4. Vote arrows and majority counters must be built from **delivered** responses, matching `raft-leader-has-quorum`, so the UI and the invariant never disagree.
+
+## CP5 status and constraints for the final frontend (CP6)
+
+**Implemented functionally in CP5** (`apps/web`, minimal styling, not the final design): the three modes (Configure, Simulate, Investigate); UX-001 (explicit lifecycle badge incl. pending pause/stop, "live" vs "replay" wording, configuration shown separately from current state); UX-002 (docked playback bar that never scrolls away, verified at 1200×600); marker navigation to exact entries; node inspection verified against the Worker engine's own snapshots; keyboard operation (Space, ←/→, Shift+←/→, [ ], Home/End, F) with accessible names on every control.
+
+**Technical constraints the visual implementation must respect** (from CP5 contracts and measurements):
+
+1. **Data source.** Visual components read `Frame`s (`TraceIndex.frameAt`) and the `Session` view only. No engine access from rendering code; no visual-only events. Every drawn element must map to a trace entry index (for causal navigation).
+2. **Render budget.** While a heavy run streams, the main thread spends ≤ ~8 ms per chunk applying it (largest measured chunk: 1.4–8 ms across engines). To keep 60 fps, per-frame rendering must stay well below ~8 ms; React updates are coalesced to one per animation frame.
+3. **3D / R3F.** The R3F scene should subscribe to the Session and read the current frame inside its own render loop (no React state update per animation frame), and must degrade gracefully (reduced motion, no WebGL).
+4. **Interpolation is display-only.** Message positions between send and delivery use `displayTime`; they are never state.
+5. **Lifecycle semantics are part of the UX contract.** `completed` (reproducible), `stopped` (by the user, complete up to there), `aborted` (Worker terminated; incomplete, not reproducible), `error`. Visual treatment must not blur them.
+6. **Live vs inspection.** "Follow live" vs a user-chosen cursor must stay visible; the run continues in the Worker while the user inspects the past.
+7. **Large traces.** 124 k-entry runs are normal (Raft with heartbeats ≈ 0.6 entries/tick for 5 nodes). Lists must be windowed; the timeline must not create a DOM node per entry.
+8. **Accessibility.** Keep the keyboard model and accessible names established in CP5; every visual state needs a text equivalent.
+

@@ -144,6 +144,22 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 
 **Know:** what is held equal between the protocols (external conditions) and what is not (their internals); how every metric is derived from the trace; why scenario B uses seed 1 and what B2 (seed 3) shows.
 
+## 22. The Worker runtime (CP5) — `packages/runtime/src/worker-core.ts`, `client.ts`, `contract.ts`
+
+**Know:** why slices end only at step boundaries and why that makes pausing harmless; the credit loop (who sends what, when, and why the Worker can never be more than `initialCredits` chunks ahead); why a throttled slice must not reschedule itself; the three ways a run ends (pause, stop, terminate) and why only the last is not reproducible; why each run gets a new Worker AND a runId.
+
+**Exercise:** draw the message sequence for "run, then the user switches experiment while chunk #7 is in flight". Mark which messages are dropped, by which check.
+
+## 23. Determinism guards — `packages/runtime/src/guard.ts`, `host.ts`
+
+**Know:** how an own property shadows a prototype method (`performance.now`) and how it is restored; why the guard is installed per slice and not per handler call (measured cost); why the Worker's clock must be captured at load; why this is not a sandbox.
+
+## 24. Incremental TraceIndex — `packages/trace/src/trace-index.ts`
+
+**Know:** why checkpoints store message IDS (not records); how three Int32Arrays represent "children of i" in insertion order; what `append` rejects and why nothing is half-added.
+
+**Exercise:** prove that `append(a); append(b)` equals `build(a ++ b)` for the step ranges when `b` starts in the middle of a step.
+
 ## Interview-style questions to practise
 
 - Why integer ticks instead of float milliseconds? What would break first with floats?
@@ -167,3 +183,7 @@ Be able to give the 2-minute version: *enumerate all sources of ambient informat
 - Your liveness check reported 13 misses although every run had a working leader. How did you find out the check was wrong, not Raft?
 - Why does a deliberately broken variant need to be *found* by exploration rather than written by hand?
 - A correct split-vote retry was flagged as "leader without quorum". What was the invariant's wrong assumption?
+- Your app streams 124 000 trace entries. Where does the main thread spend its time, and why did you move the fingerprint out of the per-chunk path?
+- How do you prove that pausing a simulation does not change its outcome?
+- Your benchmark said a 351 ms main-thread block caused a 7 ms frame gap. What was wrong with the measurement?
+- Why can a Web Worker not protect you from a malicious protocol, and what would?

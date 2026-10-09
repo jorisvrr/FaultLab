@@ -73,7 +73,7 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | E3 | **Trace size.** Full-state `state.update` entries grow with state size × steps. | 🟡 Structural sharing makes in-memory cost proportional to *changes*. Serialised size is larger. CP9: chunking/diff encoding. |
 | E6 | **Shallowly frozen trace entries.** Nested arrays (`cancelledTimers`) and objects (`run.start.protocol`) were mutable although the entry itself was frozen; the CP0/CP1 tests only checked `Object.isFrozen(entry)`. | ✅ Found in CP2 by a graph-walk test; `EventTrace.append` now deep-freezes. Regression test walks every entry of a fault-heavy run. |
 | E4 | **Golden hash updated without a version bump.** | 🟡 Process rule in the golden test and [TEST_STRATEGY](TEST_STRATEGY.md). |
-| E5 | **Cross-engine divergence** (V8 vs SpiderMonkey vs JavaScriptCore). | 🔜 CP5: Playwright runs the golden experiment in Chromium, Firefox and WebKit and compares fingerprints. |
+| E5 | **Cross-engine divergence** (V8 vs SpiderMonkey vs JavaScriptCore). | ✅ CP5: 23 reference experiments (including both engine goldens) give identical fingerprints in Chromium, Firefox, WebKit and Node (W11). |
 
 ## G. Invariant checking and exploration (CP2)
 
@@ -106,6 +106,22 @@ A catalogue of the ways a deterministic simulator goes wrong quietly. Status: �
 | H9 | **Counterexamples that prove what the author expected.** | Hand-made scenarios can be tuned to "work". | ✅ Every broken-variant fixture is found by exploration, minimised, replayed, and contrasted with the correct protocol under the same experiment; tests fail if nothing is found. |
 | H10 | **Fixtures overwritten on a version bump.** | Regenerating "to make tests pass" erases evidence. | ✅ Writers never overwrite; old fixtures replay via `projectTrace`. |
 | H11 | **A broken variant too coarse to reach the defect it is named after.** The first `no-step-down` ignored all higher terms, so no leader was ever elected and the step-down path was never executed. | It still "failed" an invariant (term adoption), which looked like success. | ✅ Split into `no-step-down` (adopts the term, keeps leading) and `ignore-higher-term`; a focused test establishes a leader first and shows the stale leader meeting a higher term (RAFT.md §8). |
+
+## W. Browser execution (CP5)
+
+| # | Failure mode | Why it is subtle | Status |
+|---|---|---|---|
+| W1 | **Engine on the main thread blocks the UI.** | Small demos feel fine; a 124 k-entry Raft run blocks for 345–476 ms. | ✅ One Worker per run; measured worst frame gap 14–29 ms while streaming in Chromium, Firefox and WebKit. |
+| W2 | **Pausing changes the run.** If execution could stop mid-step or depended on slice timing, a paused run would diverge. | Only visible with specific timings. | ✅ Slices end at step boundaries; property tests over slice size, budget, chunk size, credit, encoding and random pause/step/run scripts. |
+| W3 | **Stale messages from a previous run** corrupt the next run (Run A → B). | Races appear only when switching quickly. | ✅ runId on every message; the previous Worker is detached and terminated before a new load; consumers are reset BEFORE the new run is announced (an ordering bug here was found by the Session test). |
+| W4 | **Lost, duplicated or reordered chunks.** | Structured clone is reliable, but code bugs are not. | ✅ `seq` + absolute ranges + per-entry index checks → protocol violation; fingerprint verified end to end after the run. |
+| W5 | **Unbounded queues** when the main thread is slower than the Worker. | The Worker can produce > 100 k entries/s. | ✅ Credit flow control; bounded backlog (tested); sent entries released in the Worker. A first version busy-waited for credit (empty slices + status floods); found by the slow-consumer test, fixed, guarded by a slice-count assertion. |
+| W6 | **A handler that never returns.** | Cannot be interrupted from inside its thread. | ✅ Watchdog terminates the Worker; state `aborted`, explicitly not reproducible; UI stays responsive (tested with a real infinite loop in three browsers). |
+| W7 | **Determinism guard breaks the runtime itself.** A guard on `performance.now` also blocks the Worker's own budget timing. | Happened in the in-memory test harness (it called `performance.now()` at call time): runs hung. | ✅ The runtime's clock is captured at module load (`wallClock`); architecture test: only `host.ts` touches host timing APIs. |
+| W8 | **Guard overhead.** Patching globals around every handler call made execution 2.6× slower. | Correct but expensive. | ✅ Installed once per slice; execution now equals a direct run (≈ 350 ms per 124 k entries). |
+| W9 | **Measuring jank wrongly.** `requestAnimationFrame`'s timestamp is the frame's scheduled time and hid a 350 ms block; long-task entries arrive asynchronously. | The first baseline reported 7 ms for a 351 ms block. | ✅ `performance.now()` inside the callback, `takeRecords()` before disconnecting; the test asserts the baseline shows its block. |
+| W10 | **Browser heap attribution.** `performance.memory` is rounded unless a flag is set, Chromium-only, and a local variable kept the measured structure alive. | Produced plausible-looking nonsense. | 🟡 Per-structure memory is measured in Node (same V8); browsers run a leak check across repeated runs instead. |
+| W11 | **Cross-engine divergence** (E5). | Differences in floating point or iteration order. | ✅ 23 reference experiments identical in Node, Chromium, Firefox, WebKit (both encodings). |
 
 ## F. Future UI-specific hazards (recorded now so the design respects them)
 

@@ -1,0 +1,139 @@
+/*
+ * CP5: deliberately minimal, neutral styling. Structure and accessibility only; the approved
+ * visual direction (CP6) replaces this file. Respects the user's colour scheme.
+ */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100dvh;
+}
+.shell__header {
+  display: flex;
+  gap: 1.5rem;
+  align-items: baseline;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+.shell__header h1 {
+  font-size: 1rem;
+  margin: 0;
+}
+.shell__header nav {
+  display: flex;
+  gap: 1rem;
+}
+.shell__header a[aria-current='page'] {
+  font-weight: 700;
+}
+.shell__main {
+  overflow: auto;
+  padding: 1rem;
+  min-height: 0;
+}
+/* UX-002: the playback bar is docked; it never scrolls out of view. */
+.playback {
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  padding: 0.5rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.playback__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.playback input[type='range'] {
+  flex: 1 1 12rem;
+}
+.playback__stats,
+.playback__position {
+  font-variant-numeric: tabular-nums;
+}
+.lifecycle__state {
+  font-weight: 700;
+}
+button {
+  font: inherit;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: LinkText;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.configure,
+.investigate {
+  display: grid;
+  gap: 1.5rem;
+}
+@media (min-width: 900px) {
+  .configure {
+    grid-template-columns: minmax(16rem, 1fr) 2fr;
+  }
+  .investigate {
+    grid-template-columns: 2fr 2fr 1.5fr;
+  }
+}
+.configure__list ul {
+  list-style: none;
+  padding: 0;
+}
+.configure__list button[aria-pressed='true'] {
+  font-weight: 700;
+}
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+.nodes {
+  border-collapse: collapse;
+}
+.nodes th,
+.nodes td {
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+.entries {
+  list-style: none;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.entries li[aria-current='true'] {
+  outline: 1px solid currentColor;
+}
+.entries li[data-tone='violation'],
+.alert {
+  color: #c33;
+}
+pre {
+  overflow: auto;
+  max-height: 16rem;
+  font-size: 0.8rem;
+}
+.hint {
+  opacity: 0.75;
+}

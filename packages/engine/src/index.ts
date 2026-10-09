@@ -35,7 +35,44 @@ export {
   type ViolationReport,
 } from './invariants';
 export { DEFAULT_LIMITS, MAX_NODES, resolveConfig, type Limits, type ResolvedConfig, type SimulationConfig } from './config';
-export { EventTrace, fingerprintTrace, serializeTrace, type EntryIndex, type StopReason, type TraceEntry, type TraceEntryKind } from './trace';
+export {
+  EventTrace,
+  fingerprintTrace,
+  serializeTrace,
+  TraceFingerprint,
+  type EntryIndex,
+  type FaultSkippedEntry,
+  type InvariantClearedEntry,
+  type InvariantErrorEntry,
+  type InvariantViolationEntry,
+  type LinkFaultEntry,
+  type LinkRestoreEntry,
+  type LivenessArmedEntry,
+  type LivenessCheckRef,
+  type LivenessDisarmedEntry,
+  type LivenessErrorEntry,
+  type LivenessMetEntry,
+  type LivenessMissedEntry,
+  type MessageDeliverEntry,
+  type MessageDropEntry,
+  type MessageSendEntry,
+  type NetworkHealEntry,
+  type NetworkPartitionEntry,
+  type NodeCrashEntry,
+  type NodeRecoverEntry,
+  type NodeStartEntry,
+  type ProtocolErrorEntry,
+  type RunEndEntry,
+  type RunStartEntry,
+  type StateUpdateEntry,
+  type StopReason,
+  type StorageWriteEntry,
+  type TimerCancelEntry,
+  type TimerFireEntry,
+  type TimerSetEntry,
+  type TraceEntry,
+  type TraceEntryKind,
+} from './trace';
 export { runSimulation, Simulation, type NodeInfo, type RunResult } from './simulation';
 export { TimeTravel, type Keyframe, type RecordOptions, type SeekResult } from './time-travel';
 export { MAX_LIVENESS_CHECKS, resolveLiveness, type LivenessCheck, type LivenessCheckState, type LivenessPhase, type LivenessRef } from './liveness';

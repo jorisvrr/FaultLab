@@ -1,0 +1,30 @@
+{
+  "name": "@faultlab/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FaultLab application foundation (CP5): React shell, Web Worker execution, incremental trace inspection. Functional and minimally styled; the final visual design is CP6.",
+  "license": "MIT",
+  "author": "Joris van Rijn",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:e2e": "vite build && playwright test"
+  },
+  "dependencies": {
+    "@faultlab/engine": "*",
+    "@faultlab/experiments": "*",
+    "@faultlab/runtime": "*",
+    "@faultlab/trace": "*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

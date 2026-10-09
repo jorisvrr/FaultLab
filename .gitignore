@@ -31,6 +31,10 @@ Icon?
 .vscode/*
 !.vscode/extensions.json
 
-# Playwright output (CP2.5 demo e2e)
+# Playwright output (CP2.5 demo and CP5 app e2e)
 test-results/
 playwright-report/
+
+# Measurement scripts' bundles and profiles (tools/perf)
+tools/perf/.out/
+tools/perf/.prof/

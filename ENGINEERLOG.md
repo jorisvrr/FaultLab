@@ -1769,3 +1769,273 @@ Een kapotte variant moet het pad bereiken dat hij zegt te breken. "De test faalt
 - De liveness-aanname "vertraging ≪ timeout" is tekst, geen controle per stap.
 - D = 1500 is een testgrens bij deze timing, geen eigenschap van Raft.
 - Open prestatieonderzoek: PERF-1 t/m PERF-5.
+
+---
+
+## CP5 — Web Workers, streaming en de basis van de applicatie
+
+**Datum:** 2026-10-09 · **Status:** geïmplementeerd, wacht op review · **Engine-versie:** `0.4.0-cp4` (bewust ongewijzigd: geen enkele trace is veranderd)
+
+Tot nu toe draaide de simulatie in tests of, in het CP2.5-prototype, gewoon op de hoofdthread van de browser. In CP5 krijgt elke run zijn eigen **Web Worker**. De trace wordt in stukken (*chunks*) naar de hoofdthread gestuurd, daar stap voor stap geïndexeerd, en getoond in een functionele React-applicatie met drie modi: **Configure**, **Simulate** en **Investigate**. Het definitieve visuele ontwerp volgt in CP6. Ontwerp: ADR-0021 t/m ADR-0024, SEMANTICS §19.
+
+### CP5.1 — De event loop en waarom de hoofdthread vrij moet blijven
+
+**1. Wat hebben we gebouwd?**
+Eerst een meting (Phase 0): hoe erg is het als de engine op de hoofdthread draait?
+
+**2. Waarom is dit nodig?**
+Een browser heeft per tabblad één **hoofdthread**. Die doet alles: JavaScript uitvoeren, de pagina tekenen, op klikken reageren. Dat gaat via de **event loop**: een rij taken die één voor één wordt afgewerkt. Duurt één taak lang, dan wacht al het andere. Voor 60 beelden per seconde heb je ongeveer 16 ms per beeld.
+
+**3. Hoe werkt het?**
+✅ Gemeten: een Raft-run met 124 000 entries op de hoofdthread blokkeert die 345–476 ms aan één stuk (Chrome meldt een *long task* van 374 ms). In die tijd tekent de pagina niets en reageert ze op niets. In een Worker is de langste pauze tussen twee beelden 14–29 ms.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Mijn eerste meting was fout.** Die zei dat een blokkade van 351 ms maar 7 ms "haperen" gaf. Twee fouten: de tijd die `requestAnimationFrame` meegeeft is het *geplande* tijdstip van het beeld, niet het moment waarop de code draait; en long-task-meldingen komen pas later binnen, terwijl ik de observer al had afgesloten. Nu meet ik met `performance.now()` in de callback en haal ik openstaande meldingen op met `takeRecords()`. De test eist zelfs dat de basismeting haar eigen blokkade laat zien, zodat zo'n meetfout niet ongemerkt terugkomt.
+
+**8. Belangrijkste begrippen**
+- **Event loop:** de lus die taken één voor één uitvoert.
+- **Main thread / hoofdthread:** de thread die de pagina tekent en op invoer reageert.
+- **Long task:** een taak van meer dan 50 ms.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom hapert een pagina als één JavaScript-taak 350 ms duurt, ook al gebruikt de computer meerdere cores?
+2. Waarom is de tijdstempel die `requestAnimationFrame` meegeeft niet geschikt om een blokkade te meten?
+
+### CP5.2 — Web Workers en berichten
+
+**1. Wat hebben we gebouwd?**
+Het pakket `@faultlab/runtime`: een `WorkerCore` die in de Worker de simulatie draait, een `RuntimeClient` op de hoofdthread, en een vast **berichtenprotocol** (`faultlab-worker/1`) daartussen.
+
+**2. Waarom is dit nodig?**
+Een **Web Worker** is een aparte thread met een eigen event loop. Hij deelt geen variabelen met de hoofdthread: alles gaat via **berichten** (`postMessage`). Daardoor kan de simulatie rekenen terwijl de pagina soepel blijft.
+
+**3. Hoe werkt het?**
+- De hoofdthread stuurt commando's: `load`, `run`, `pause`, `step`, `stop`, `credit` en `snapshot`.
+- De Worker stuurt gebeurtenissen terug: `loaded`, `chunk`, `status`, `finished` en `error`.
+- Elk bericht heeft een protocolversie en een **runId**. Beide kanten controleren elk bericht. Een onbekend of fout bericht wordt een fout, het wordt nooit "geraden".
+- Een functie kan niet als bericht worden verstuurd. Daarom gaat een experiment als **JSON-specificatie** naar de Worker (`@faultlab/experiments`): het protocol staat erin als naam en versie, en de Worker zoekt de code op in een register.
+
+**4. Welke keuzes zijn gemaakt?**
+Eén nieuwe Worker per run. Zo kan een oude run een nieuwe nooit beïnvloeden, ook niet met berichten die nog onderweg zijn.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een volgordefout bij het wisselen van experiment.** De client meldde eerst "nieuwe run, laden…" en wiste pas daarna de oude trace. Een fractie van een seconde zag de UI dus de nieuwe status met de oude gegevens. De Session-test vond het; nu wordt eerst gewist en dan pas gemeld.
+
+**8. Belangrijkste begrippen**
+- **Message passing:** samenwerken door berichten te sturen in plaats van geheugen te delen.
+- **Contract / protocolversie:** de afgesproken vorm van berichten, met een versienummer.
+- **runId:** een unieke naam per run, zodat berichten van een oude run herkenbaar zijn.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kun je een protocol-object met functies niet naar een Worker sturen, en wat doen we in plaats daarvan?
+2. Run A loopt nog, je kiest run B. Noem twee mechanismen die voorkomen dat een bericht van A de toestand van B verandert.
+
+### CP5.3 — Structured clone of een buffer? Eerst meten
+
+**1. Wat hebben we gebouwd?**
+Twee manieren om trace-entries te versturen. **Structured clone**: de browser kopieert de objecten zelf. **JSON in een transferable buffer**: de Worker maakt van de entries tekst en dan bytes (`ArrayBuffer`), en *verplaatst* die buffer zonder te kopiëren.
+
+**2. Waarom is dit nodig?**
+Er gaan per run tienduizenden entries over de grens. Hoe dat gebeurt, bepaalt hoeveel werk de hoofdthread heeft.
+
+**3. Hoe werkt het?**
+✅ Gemeten in alle drie de browsers (124 000 entries). Het werk in de Worker is ongeveer gelijk. Op de hoofdthread is clone goedkoper: Chrome 61 tegen 103 ms, Firefox 136 tegen 215 ms, WebKit 74 tegen 127 ms. Bij JSON moet de hoofdthread de tekst nog terug omzetten.
+
+**4. Welke keuzes zijn gemaakt?**
+Clone is de standaard: het is het eenvoudigst en het is gemeten het snelst. JSON blijft beschikbaar en getest.
+
+**8. Belangrijkste begrippen**
+- **Structured clone:** de browser maakt een diepe kopie van data die een bericht ingaat.
+- **Transferable:** een buffer die wordt *overgedragen* in plaats van gekopieerd. Daarna is hij bij de afzender leeg.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "zero-copy" met een transferable buffer hier toch niet sneller op de hoofdthread?
+2. Wat gebeurt er met een `ArrayBuffer` in de Worker nadat je hem als transferable hebt verstuurd?
+
+### CP5.4 — Time slicing: pauzeren zonder iets te veranderen
+
+**1. Wat hebben we gebouwd?**
+De Worker rekent in **slices**: hele simulatiestappen, tot 8 ms op is. Dan stuurt hij wat hij gemaakt heeft en geeft hij de event loop terug, zodat `pause` en `stop` kunnen binnenkomen.
+
+**2. Waarom is dit nodig?**
+Een Worker die in één keer doorrekent, kan niet gepauzeerd worden: hij leest zijn berichten pas als hij klaar is.
+
+**3. Hoe werkt het?**
+Een slice stopt alleen tussen twee stappen, nooit midden in een stap. Daarom maakt het voor de uitkomst niets uit hoe groot een slice is, of hoe vaak je pauzeert. De volgende slice wordt ingepland met een `MessageChannel`: `setTimeout` wordt na een paar keer nesten minstens 4 ms vertraagd.
+
+**4. Welke keuzes zijn gemaakt?**
+- **Coöperatief pauzeren:** de Worker pauzeert zelf, bij de volgende stapgrens, en bevestigt dat.
+- **Normaal stoppen:** ook bij een stapgrens. Alles wat al gemaakt was, komt nog aan, en de run heet "stopped".
+- **Geforceerd beëindigen:** de Worker wordt direct afgesloten. De run heet "aborted": onvolledig en niet reproduceerbaar.
+
+**6. Hoe hebben we het getest?**
+✅ Property tests: willekeurige slice-groottes, tijdsbudgetten, chunk-groottes, credits en encodings, en willekeurige reeksen van pause, step en run. Steeds exact dezelfde trace als een directe run. ✅ In de browser: 40 pauze-hervat-cycli midden in een lange run, met dezelfde fingerprint.
+
+**8. Belangrijkste begrippen**
+- **Time slicing:** werk in kleine porties opdelen, met tussendoor ruimte voor iets anders.
+- **Coöperatieve annulering:** de code stopt zelf op een veilig punt, omdat iemand dat vroeg.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom verandert pauzeren de simulatie niet? Gebruik het begrip stapgrens.
+2. Wat is het verschil tussen "stopped" en "aborted", en waarom is alleen het eerste reproduceerbaar?
+
+### CP5.5 — Backpressure: de Worker mag niet te ver vooruit lopen
+
+**1. Wat hebben we gebouwd?**
+**Credit-based flow control.** De Worker mag maximaal 4 chunks versturen die nog niet verwerkt zijn. Voor elke chunk die de hoofdthread *verwerkt* heeft, krijgt de Worker één credit terug.
+
+**2. Waarom is dit nodig?**
+De Worker maakt meer dan 100 000 entries per seconde. Als de hoofdthread het niet bijhoudt, groeien de berichtenrijen en het geheugen zonder grens.
+
+**3. Hoe werkt het?**
+Zonder credit en met een volle chunk klaar stopt de Worker met rekenen (*throttled*), tot er credit komt. Verstuurde entries gooit hij weg (`releaseTraceBefore`), zodat de Worker nooit de hele trace vasthoudt.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Een busy-wait.** Terwijl de Worker op credit wachtte, plande hij toch steeds een nieuwe slice in. Die deed niets en plande weer een nieuwe in. Dat kost CPU en stuurt een stroom statusberichten naar de hoofdthread. De test met een "trage consument" vond het. Nu wekt alleen een credit-bericht de Worker weer. De test controleert dat er niet veel meer slices zijn dan stappen, zodat de fout niet terug kan komen.
+✅ Die test faalde eerst ook om een andere reden: met een opgewarmde JIT draaide de hele run in één slice, vóór de consument kon achterlopen. Nu zijn de slices bewust klein, zodat de test altijd hetzelfde meet.
+
+**8. Belangrijkste begrippen**
+- **Backpressure:** de ontvanger remt de zender af.
+- **Busy waiting:** wachten door steeds opnieuw te kijken, in plaats van te wachten op een signaal.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom geeft de client de credit pas terug *nadat* een chunk verwerkt is, en niet bij ontvangst?
+2. Hoeveel entries kan de Worker hooguit voorlopen op de hoofdthread? Leid de grens af.
+
+### CP5.6 — Een oneindige lus stoppen
+
+**1. Wat hebben we gebouwd?**
+Een **watchdog** op de hoofdthread. Zegt de Worker te lang niets terwijl hij zou moeten werken, dan wordt hij beëindigd met `terminate()`. De run heet dan "aborted".
+
+**2. Waarom is dit nodig?**
+Een functie die nooit terugkeert (`for(;;){}`) kun je niet van binnenuit onderbreken: de thread komt nooit meer bij zijn event loop. Je kunt alleen de hele thread afsluiten.
+
+**3. Hoe werkt het?**
+✅ Getest met een echte oneindige lus (het diagnostische protocol `diagnostic-spin`) in drie browsers. De pagina blijft reageren: meer dan 20 beelden per seconde en navigatie werkt. Na de wachttijd volgt "aborted", met de melding dat de uitkomst niet reproduceerbaar is.
+
+**4. Welke keuzes zijn gemaakt?**
+De watchdog let alleen op als de Worker *zou moeten* werken: bij laden, tijdens een run, of bij een openstaande pauze of stop. Een gepauzeerde run zegt terecht niets.
+
+**8. Belangrijkste begrippen**
+- **Watchdog:** een bewaker die ingrijpt als iets te lang niet reageert.
+- **Geforceerde beëindiging:** de thread wordt van buitenaf gestopt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom kan de simulatie zelf een oneindige lus niet stoppen, ook niet met een timer?
+2. Waarom mag een "aborted" run nooit als "completed" getoond worden?
+
+### CP5.7 — Determinismebewaking, en wat dat kost
+
+**1. Wat hebben we gebouwd?**
+Tijdens het rekenen gooien `Math.random`, `Date`, `performance.now`, timers en `crypto` een fout. Een protocol dat ze per ongeluk gebruikt, krijgt dan een nette `protocol.error`, op precies hetzelfde punt in elke run.
+
+**2. Waarom is dit nodig?**
+Eén `Math.random()` in een protocol en de run is niet meer reproduceerbaar.
+
+**3. Hoe werkt het?**
+De functies worden tijdelijk vervangen. `performance.now` zit op het prototype: daarvoor maken we een eigen eigenschap (*own property*) die het prototype overschaduwt, en die halen we daarna weer weg.
+
+**5. Welke problemen kwamen we tegen?**
+✅ **Te duur.** Eerst deed ik dit rond elke handler-aanroep. De simulatie werd daardoor 2,6× trager (gemeten: 487 tegen 1258 ms). Nu gebeurt het één keer per slice, en kost het vrijwel niets.
+✅ **De bewaking blokkeerde de runtime zelf.** De testopstelling vroeg de klok op met `performance.now()` binnen een slice, en dat gaf nu een fout. Runs bleven hangen. Daarom wordt de klok van de runtime vastgelegd bij het laden van de module (`wallClock`). Een architectuurtest zorgt ervoor dat alleen `host.ts` die functies direct gebruikt.
+
+**7. Wat heb ik hiervan geleerd?**
+Dit is bescherming tegen *ongelukken*, geen beveiliging. Code die echt kwaad wil, vindt een omweg. Echte isolatie van onbetrouwbare protocollen is CP10.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is de bewaking per slice net zo veilig als per handler, en veel goedkoper?
+2. Waarom maakt de Worker toch geen sandbox van onbetrouwbare code?
+
+### CP5.8 — De trace stap voor stap indexeren
+
+**1. Wat hebben we gebouwd?**
+`TraceIndex.append(chunk)`: de index groeit mee met elke chunk. Het resultaat is precies hetzelfde als wanneer je achteraf de hele trace indexeert.
+
+**3. Hoe werkt het?**
+✅ **Een subtiele valkuil.** Een checkpoint van vóór de aflevering van een bericht bewaarde het bericht met de status "onderweg". Een volledig gebouwde index kent op dat moment de uiteindelijke status al. Dan zou `append` iets anders opleveren dan `build`. Daarom bewaren checkpoints nu alleen *id's*, en wordt de actuele status pas opgezocht als een frame gebouwd wordt.
+
+**4. Welke keuzes zijn gemaakt?**
+"Wie werd door deze entry veroorzaakt?" wordt nu opgeslagen in drie `Int32Array`'s: eerste kind, laatste kind en volgende broer of zus. Dat zijn gelinkte lijsten in getypeerde arrays: 12 bytes per entry in plaats van een array per entry.
+
+**6. Hoe hebben we het getest?**
+✅ Elk mogelijk splitpunt van een trace van ruim 150 entries. ✅ Willekeurige splitsingen in veel stukken, met verschillende checkpoint-intervallen en protocollen. ✅ Na elke `append` is de index gelijk aan een index van het deel dat tot dan toe binnen was.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom zou een checkpoint met hele berichtrecords `append` en `build` laten verschillen?
+2. Hoe vind je met `firstChild` en `nextSibling` alle kinderen van een entry, in volgorde?
+
+### CP5.9 — Geheugen meten (PERF-3) en vertragingen verklaren (PERF-4)
+
+**1. Wat hebben we gebouwd?**
+Meetscripts (`tools/perf`) die gebundeld en met de profilers van V8 gedraaid worden (`--cpu-prof`, `--expose-gc`, `--trace-gc`).
+
+**3. Hoe werkt het?**
+- ✅ **PERF-3:** de index kostte ongeveer even veel geheugen als de trace zelf. 64 % daarvan waren de lijsten met kinderen per entry (41,9 MB). Na de omzetting naar getypeerde arrays: 38,1 MB in plaats van 70,4 MB. Dat is 49 % van de trace.
+- ✅ **PERF-4:** de trage sprongen van meer dan 100 ms kwamen *niet* door GC-pauzes: die verklaarden 0–4 % van de tijd. Dezelfde sprong opnieuw doen was snel (201 → 22 ms). Met een vooraf vergrote heap verdwenen de uitschieters. De oorzaak is dus het laten groeien van de heap terwijl een trace van ongeveer 300 MB in het geheugen staat. De Worker bewaart nu alleen keyframes, niet de hele trace.
+
+**5. Welke problemen kwamen we tegen?**
+✅ Mijn eerste geheugenscript mat overal 0. Een lokale variabele die nergens meer gebruikt werd, ruimde V8 al op vóór de meting. Getypeerde arrays tellen bovendien buiten `heapUsed`. In de browser bleek geheugen per structuur meten onbetrouwbaar: Chrome rondt `performance.memory` af tenzij je een vlag zet, en ook daarna gaf het onzin. Daar meet ik nu alleen of het geheugen na herhaalde runs terugkomt (lektest: 44 → 51 MB, daarna stabiel).
+
+**7. Wat heb ik hiervan geleerd?**
+Een hypothese ("het is vast GC") is geen bevinding. Herhaal, varieer één ding tegelijk, en kijk wat verandert.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Welke drie proeven samen lieten zien dat de uitschieters niet door GC-pauzes kwamen?
+2. Waarom kan een lokale variabele een geheugenmeting laten mislukken, in beide richtingen?
+
+### CP5.10 — PERF-5: mijn eigen hypothese was fout
+
+**1. Wat hebben we gebouwd?**
+Een profiel van de traagheid bij veel leiderwissels. In CP4 had ik opgeschreven: "de engine kopieert elke stap de hele geschiedenis". Dat klopte niet. De engine hergebruikt ongewijzigde, al gecontroleerde data al (via een `WeakSet`).
+
+**3. Hoe werkt het?**
+✅ De echte oorzaak: de Raft-geschiedenissen zijn platte objecten die per term groeien. Elke *wijziging* kopieert het hele object twee keer: één keer in de invariant zelf, en één keer in de engine, met `defineProperty` per sleutel. Dat laatste was 57 % van de rekentijd. Met `Object.fromEntries` is het resultaat precies hetzelfde maar ongeveer 1,6× sneller: 38 → 22,6 µs per stap bij 465 termen.
+
+**4. Welke keuzes zijn gemaakt?**
+Ik stop bij deze verbetering, met een onderbouwing. De kosten vallen nu in de Worker: dat raakt de doorvoer, niet de vloeiendheid van de pagina (gemeten). Realistische runs hebben tientallen termen. En de echte oplossing (geschiedenis opslaan als boom per term) verandert de vorm van drie CP4-invarianten, met versie 2 en het opnieuw vastleggen van CP4-resultaten als gevolg. Die oplossing ligt klaar voor als een echte situatie erom vraagt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom groeit de kostprijs per wijziging met het aantal termen?
+2. Waarom is `Object.fromEntries` veilig waar gewone toewijzing (`out[key] = …`) dat niet is? Denk aan `__proto__`.
+
+### CP5.11 — Verschillende browsers, dezelfde uitkomst
+
+**3. Hoe werkt het?**
+✅ 23 referentie-experimenten: de twee engine-goldens (`7fda34b3`, `6a1dfe65`), alle presets en alle 13 opgeslagen tegenvoorbeelden. Ze geven in Node, Chromium (Chrome 154), Firefox 157 en WebKit 27.2, met beide encodings, precies dezelfde fingerprint. De referenties worden in Node berekend en vastgelegd; de browsers moeten ze reproduceren.
+
+**7. Wat heb ik hiervan geleerd?**
+Dit lukt omdat de engine alleen gehele getallen, `Math.imul`, strings en JSON gebruikt: geen sinus, geen tijd, geen landinstellingen. Determinisme over browsers heen is een ontwerpkeuze, geen geluk.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Welke soorten JavaScript-functies zouden in verschillende browsers net een ander antwoord kunnen geven?
+2. Waarom worden de referentie-fingerprints in Node berekend en niet in een van de browsers?
+
+### CP5.12 — De applicatie: React zonder dat React iets beslist
+
+**1. Wat hebben we gebouwd?**
+`apps/web` met React 19 en drie modi. Een framework-onafhankelijke `Session` bevat de run, de trace, de cursor, het "live volgen" en de selectie. React leest die via `useSyncExternalStore`.
+
+**2. Waarom is dit nodig?**
+React mag nooit bepalen wát er gebeurt, alleen hoe het eruitziet. De UI beïnvloedt een run alleen door een specificatie te laden en commando's te sturen.
+
+**3. Hoe werkt het?**
+- Meldingen worden samengevoegd tot hooguit één per beeld (`requestAnimationFrame`), zodat een snelle Worker React niet kan overspoelen.
+- ✅ **De integriteitscontrole lag in de weg.** Bij elke chunk een fingerprint berekenen was ongeveer 60 % van het werk op de hoofdthread. Volgorde, gaten en dubbele stukken worden al per chunk goedkoop gecontroleerd. De fingerprint volgt daarom ná de run, in kleine porties. Het werk op de hoofdthread ging van ongeveer 575 naar 61–136 ms per 124 000 entries, en het 95e percentiel van de beeldpauzes van 45–51 naar 19–48 ms.
+- UX-001 (duidelijke levensfase) en UX-002 (vaste bedieningsbalk) werken, net als bediening met het toetsenbord.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom zit de toestand in een `Session`-klas en niet in React-state?
+2. Waarom is het goed om een controle te verplaatsen in plaats van te schrappen, en wat blijft er per chunk nog over?
+
+### CP5 — Kwaliteitscontrole
+
+- ✅ Mutatietesten: 25 mutanten op de client, de Worker, de bewaking, de incrementele index, het contract, het register en de engine. De eerste ronde ving er 23. **W7** (Worker houdt de hele trace vast) overleefde, omdat niets het geheugen van de Worker zag. De Worker meldt nu `maxRetainedEntries` en een test begrenst dat. **C7** (verificatie genegeerd) overleefde twee keer: eerst omdat geen test een verkeerde fingerprint aanbood, daarna omdat de mutant zelf fout was opgeschreven (de echte verificatie liep nog en overschreef hem). Na beide reparaties: 25 van 25 gevangen.
+- Alle tests van CP0 t/m CP4 slagen ongewijzigd; geen golden fingerprint of fixture is aangepast.
+
+### CP5 — Bekende beperkingen
+
+- De Worker is een uitvoeringsgrens, geen sandbox; protocollen blijven vertrouwde code (CP10).
+- Geheugen per structuur is alleen in Node gemeten; in browsers alleen een lektest (Chromium).
+- PERF-5 is verzacht, niet opgelost: bij honderden termen groeit de kostprijs per stap nog.
+- De integriteitscontrole van de ontvangen trace volgt ná de run; tijdens de run garanderen volgorde- en bereikcontroles de volledigheid.
+- Het CP2.5-prototype (`apps/demo`) bestaat nog en is niet aangepast, behalve de versiecompatibiliteit uit CP4.

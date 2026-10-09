@@ -79,22 +79,20 @@ function copyObject(value: object, path: string, ancestors: Set<object>): JsonOb
   if (Object.getOwnPropertySymbols(value).length > 0) {
     throw new InvalidJsonError(path, 'symbol keys are not allowed');
   }
-  const out: Record<string, JsonValue> = {};
+  // Collected first, then created with Object.fromEntries: like defineProperty (and unlike plain
+  // assignment) it creates own data properties without invoking setters, so a "__proto__" key
+  // becomes an own data property instead of replacing the copy's prototype. It is ≈ 1.6× faster
+  // than defining keys one by one (PERF-5, CP5). Same keys, order and values, frozen: the result
+  // is indistinguishable.
+  const entries: [string, JsonValue][] = [];
   for (const key of Object.keys(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !('value' in descriptor)) {
       throw new InvalidJsonError(`${path}.${key}`, 'accessor properties are not allowed');
     }
-    // defineProperty (not assignment) so a "__proto__" key becomes an own data property
-    // instead of silently replacing the copy's prototype.
-    Object.defineProperty(out, key, {
-      value: copy(descriptor.value, `${path}.${key}`, ancestors),
-      enumerable: true,
-      writable: false,
-      configurable: false,
-    });
+    entries.push([key, copy(descriptor.value, `${path}.${key}`, ancestors)]);
   }
-  return Object.freeze(out);
+  return Object.freeze(Object.fromEntries(entries) as JsonObject);
 }
 
 /**

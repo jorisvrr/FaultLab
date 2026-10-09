@@ -98,6 +98,64 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP5 results
+
+**Tests:** 747 passing across seven workspaces (engine 420, trace 23, protocols 184, experiments 49, runtime 55, demo 10, web 6) plus 13 fixture/result writers that run only on request; all typechecks and both production builds pass. Playwright (`apps/web`, production build, Chromium = Chrome 154, Firefox 157.0, WebKit 27.2): 42 passing (14 tests × 3 engines). The CP2.5 demo's 6 Playwright tests still pass in Chrome.
+
+| Layer | What it proves | Where |
+|---|---|---|
+| Experiment registry | Registry identity; 12 rejections with exact paths; JSON round trip; presets behave as described; 13 counterexample presets identical to their fixtures and replay to the recorded fingerprint (CP2 ones via `projectTrace`) | `packages/experiments/test/` |
+| Engine streaming APIs | `entriesSince` streams exactly the trace in batches with releases (40 runs); `TraceFingerprint` equals `fingerprintTrace` for every chunking; rejects gaps | `packages/engine/test/streaming-api.test.ts` |
+| Worker runtime (in-memory Worker with clone/transfer semantics) | Equality with direct runs (both encodings); slice/budget/chunk/credit/encoding property (25); random pause/step/run scripts (30); exact step(n); pause at a step boundary; stop delivers every entry; flow-control bound; throttling without busy-wait; Start→Stop→Start; Run A→B; stale runId; 5 protocol violations; invalid spec path; abort; watchdog (injected clock); snapshots at current and earlier steps | `packages/runtime/test/runtime.test.ts` |
+| Determinism guard | 9 APIs → reproducible `NondeterminismError`; full restore; nesting; traces unchanged; Worker clock unaffected | `guard.test.ts` |
+| Contract and architecture | Command/event validation; runtime imports; no React below `apps/web`; only `host.ts` touches timing APIs | `contract.test.ts`, `architecture.test.ts` |
+| Incremental TraceIndex | Every single split point of a 150+ entry trace; random multi-splits × checkpoint intervals × protocols (40); prefix equality after each append; record resolution across checkpoints; rejection; cost bound | `packages/trace/test/incremental.test.ts` |
+| App state | Follow/cursor, entries/steps/markers navigation, view adapter, reset on load (found an ordering bug) | `apps/web/test/session.test.ts` |
+| Cross-browser determinism | 23 reference experiments (engine goldens 7fda34b3 / 6a1dfe65, all presets, all 13 counterexamples), Node-computed and pinned, reproduced in each browser with both encodings | `apps/web/e2e/determinism.spec.ts` + `test/browser-goldens.test.ts` |
+| Lifecycle and UX | Lifecycle sequence incl. step; stop + restart; rapid start/stop/start and A→B; keyboard and accessible names; docked controls at 1200×600 | `e2e/lifecycle.spec.ts` |
+| Watchdog | Real infinite loop: UI keeps > 20 fps and navigates; `aborted` after the watchdog; never shown as complete; a new run works | `e2e/watchdog.spec.ts` |
+| Inspection | Main-thread reconstruction equals the Worker engine's snapshot at 7 step boundaries; violation → cause chain → fixture verification (legacy); markers to exact entries | `e2e/inspection.spec.ts` |
+| Performance gate | See below | `e2e/performance.spec.ts`, `tools/perf/` |
+
+### Performance gate (CP5)
+
+**Phase 0 baseline (Node 24 + V8 profilers, `tools/perf/`).** PERF-5 churn: 18.5 → 38.0 µs/step from 20 k to 160 k ticks; profile: `validateVerdict → toFrozenJson → copyObject` 57 % of CPU. PERF-3: index 64–85 MB on a 78 MB trace; child arrays 41.9 MB, message records 16.3 MB. PERF-4: > 100 ms seeks only with the full trace retained; GC pauses explain 0–4 % of them. PERF-2: view ≈ 3.1 µs/step.
+
+**Browser baseline vs Worker** (124 k-entry Raft run, production build; Chrome 154 / Firefox 157 / WebKit 27.2):
+
+| | Chromium | Firefox | WebKit |
+|---|---|---|---|
+| Engine on the main thread: run / longest frame gap | 337 / 363 ms (long task 363 ms) | 421 / 467 ms | 307 / 336 ms |
+| Worker, clone: wall / entries per s | 938 ms / 132 k | 945 ms / 131 k | 977 ms / 127 k |
+| Worker execute / flush (incl. fingerprint) | 331 / 565 ms | 454 / 466 ms | 355 / 577 ms |
+| Main-thread chunk work total / largest chunk | 63 / 1.6 ms | 156 / 8 ms | 76 / 2 ms |
+| Longest frame gap while streaming (no React) | 21 ms | 15 ms | 22 ms |
+| JSON instead of clone: main-thread chunk work | 104 ms | 221 ms | 122 ms |
+| Worker peak retained entries | 3 593 | 2 616 | 3 275 |
+| Main-thread seek (`frameAt`) max | 0.2 ms | 1 ms | 1 ms |
+| Worker seek (snapshot at a random step) median / max | 6.3 / 9.6 ms | 8 / 13 ms | 6 / 11 ms |
+| 40 pause/resume cycles: identical trace / longest gap | ✅ / 21 ms | ✅ / 14 ms | ✅ / 25 ms |
+| App with live rendering: frame gap p50 / p95 / max | 17 / 19 / 31 ms | 8 / 12 / 16 ms | 17 / 44 / 83 ms (3 gaps > 50 ms) |
+| Leak check (heap after GC, 3 disposed long runs) | 51.1 → 46.2 → 49.6 → 49.6 MB | (no API) | (no API) |
+
+**Acceptance criteria** (asserted in `e2e/performance.spec.ts`): received trace equals the reference after long runs, both encodings and 40 pause/resume cycles; largest main-thread chunk < 50 ms; slowest main-thread seek < 50 ms; longest frame gap while the Worker runs < 250 ms; app p95 frame gap with live rendering < 50 ms; heap growth after three disposed long runs < 10 MB (Chromium); the main-thread baseline must show its own block (> 200 ms), so a broken measurement cannot pass silently.
+
+**Changes made because of the measurements** (each before/after measured): guard per slice instead of per handler call (execution 1258 → ≈ 487 ms in Node, i.e. no overhead); received-trace fingerprint after the run in batches instead of per chunk (main-thread chunk work ≈ 575 → 61–156 ms; app p95 45–51 → 12–44 ms); Worker no longer busy-waits for credit; clone chosen as default encoding; incremental index with typed-array causality (PERF-3); engine `Object.fromEntries` copy (PERF-5).
+
+**Known:** WebKit renders the live app with more long frames than Chromium and Firefox (p95 44 ms, max 83 ms); to be profiled with the real CP6 renderer before tuning anything. Browser heap per structure is not measurable reliably (see FAILURE_MODES W10).
+
+### CP5 mutation pass (25 mutants; harness restores in `finally`, checksums verified)
+
+| Group | Mutants (failing tests) | Result |
+|---|---|---|
+| Client | C1 chunk order/gap check removed (2) · C2 stale runId check removed (1) · C3 credit never returned (7, by timeout) · C4 watchdog fires while idle (1) · C5 previous Worker not terminated (7) · C6 reset after announcing the new run (1, app Session test) · C7 verification result ignored (1) | caught |
+| Worker core | W1 never throttles (2) · W2 busy-waits while throttled (1) · W3 finishes before all entries are sent (2) · W4 pause does not stop execution (1) · W5 step(n) runs n+1 steps (2) · W6 snapshot from a later keyframe (1) · W7 Worker retains the whole trace (1) | caught |
+| Guard | G1 never restores (25) · G2 Date statics unguarded (1) | caught |
+| Incremental index | T1 outcome never recorded (1) · T2 step range not extended (3) · T3 sibling links corrupted (2) · T4 append accepts gaps (2) | caught |
+| Contract / registry / engine | K1 chunk positions unchecked (1) · X1 protocol version ignored (1) · S1 unknown spec fields accepted (1) · E1 fingerprint without separators (1) · E2 entriesSince off by one (2) | caught |
+
+**Result: 25 of 25 detected — after closing two gaps found by the first pass (23 / 25).** W7 survived because nothing observed the Worker's memory: the Worker now reports `maxRetainedEntries`, and a test bounds it. C7 survived twice: first because no test fed a wrong fingerprint (test added), then because the mutant itself was mis-specified (it set "verified" while the real verification still ran and overwrote it); redefined as "verification result ignored", it is caught.
+
 ## CP4 results
 
 **Tests:** engine 416 (+3 fixture writers), `@faultlab/trace` 18, `@faultlab/protocols` 184 (+10 fixture/result writers that run only on request), demo 10, Playwright 6; all green; typechecks and the demo build pass. Coverage: protocols 100 % lines / 97.8 % branches; engine 98.1 % lines / 96.4 % branches; trace 100 % lines / 95.4 % branches (two TraceIndex liveness tests added after review: phases after every step vs. the engine, `liveness.missed` as a step trigger, markers).

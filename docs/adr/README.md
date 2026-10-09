@@ -24,3 +24,8 @@ Each record answers: **problem · decision · alternatives · trade-off · invar
 | [0018](0018-raft-election-model.md) | `@faultlab/protocols`: Raft election per Figure 2; five historical invariants from real events; broken variants | Accepted (CP4) |
 | [0019](0019-bounded-liveness.md) | Bounded, conditional liveness checks with real deadline events; never safety | Accepted (CP4) |
 | [0020](0020-comparison-and-counterexamples.md) | Naive-vs-Raft comparison under identical external conditions; counterexample format 2 | Accepted (CP4) |
+| [0021](0021-experiment-spec-and-registry.md) | Experiments as JSON specs resolved against a versioned registry (`@faultlab/experiments`) | Accepted (CP5) |
+| [0022](0022-worker-runtime.md) | Time-sliced Worker runtime: versioned protocol, runIds, credit flow control, watchdog, slice-level determinism guard | Accepted (CP5) |
+| [0023](0023-incremental-trace-index.md) | Incremental TraceIndex (`append`) with typed-array causality (PERF-3) | Accepted (CP5) |
+| [0024](0024-application-architecture.md) | React application foundation for Configure / Simulate / Investigate; constraints for CP6 | Accepted (CP5) |
+

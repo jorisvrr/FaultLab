@@ -4,7 +4,7 @@
 
 FaultLab runs networks of virtual computers executing distributed protocols under controlled latency, crashes, message loss and partitions. Every run is reproducible from its seed. Every message, timer and state change is recorded in an append-only, causally linked trace that you can inspect, replay and share.
 
-> **Status: CP4, Raft leader election (awaiting review).** The simulation engine exists and is tested, including crashes, recovery, persistence, partitions, loss and delay, online safety invariants with explainable violations, automatic search for minimal failing fault plans, snapshots and time travel, and bounded liveness checks. `@faultlab/protocols` implements Raft's leader election (not log replication, which is CP8). There is no final UI yet, by design: the engine's contracts come first. See the [roadmap](docs/ROADMAP.md).
+> **Status: CP5, Web Worker runtime and React application foundation (awaiting review).** The deterministic engine (crashes, partitions, loss, invariants, snapshots, bounded liveness, Raft leader election) now runs in a Web Worker per run, streams its trace with flow control to the main thread, and is inspected through an incremental TraceIndex in a functional React shell (Configure / Simulate / Investigate). The final visual design is CP6. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -99,7 +99,7 @@ const result = runSimulation({
 - **`@faultlab/protocols`** (CP4): Raft leader election per Figure 2 of the paper, five historical safety invariants, six deliberately broken variants with stored counterexamples, and a reproducible naive-vs-Raft comparison
 - **Snapshots** at step boundaries (versioned JSON, validated as untrusted), **keyframe time travel** (seek in < K steps, regenerate any trace range with absolute indices, memory-bounded runs)
 - **`@faultlab/trace`**: a framework-independent TraceIndex for fast, exact inspection of any trace entry, steps, markers and causal chains
-- 628 tests (engine 416, trace 18, protocols 184, demo 10) plus 6 Playwright tests: unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
+- 747 unit/property tests across seven workspaces, plus Playwright suites (demo: 6 in Chrome; app: 14 tests × Chromium, Firefox and WebKit): unit, property-based (deterministic seeds), an independent trace oracle, reference vectors, golden traces with legacy projections, stored counterexamples, architecture fitness, mutation-checked
 
 ## Getting started
 
@@ -107,16 +107,20 @@ Requires Node ≥ 22.12.
 
 ```bash
 npm install
-npm run check      # typecheck + all tests + demo build
+npm run check      # typecheck + all tests + both production builds
 npm run coverage
 ```
 
-### See it in a browser (CP2.5 prototype)
+### See it in a browser
 
 ```bash
-npm run dev        # then open http://127.0.0.1:5173/
-npm run test:e2e   # Playwright checks against the locally installed Chrome
+npm run dev        # the CP5 application: http://127.0.0.1:5180/
+npm run dev:demo   # the CP2.5 prototype viewer: http://127.0.0.1:5173/
+npm run test:e2e   # Playwright: demo (Chrome) + app (Chrome, Firefox, WebKit; run `npx playwright install firefox webkit` once)
 ```
+
+`apps/web` (CP5) runs every experiment in its own **Web Worker** (time-sliced, pausable, flow-controlled, with a watchdog), streams the trace to the main thread, indexes it incrementally, and lets you configure, run and investigate it. It is functional and deliberately unstyled; the approved visual design arrives in CP6.
+
 
 `apps/demo` is a temporary, deliberately plain trace viewer (Vite + TypeScript + SVG). It **executes** an experiment with the real engine in the page, then **replays** the completed trace. Every node state, message, crash, partition and violation on screen is derived from trace entries (`apps/demo/src/derive.ts`, cross-checked against the live engine after every step). It is not the final interface.
 
@@ -126,12 +130,15 @@ npm run test:e2e   # Playwright checks against the locally installed Chrome
 packages/engine/        @faultlab/engine: zero runtime dependencies, no DOM, no Node
 packages/trace/         @faultlab/trace: read-only TraceIndex over completed traces (engine types only)
 packages/protocols/     @faultlab/protocols: Raft leader election, its invariants and liveness check (engine types only)
+packages/experiments/   @faultlab/experiments: JSON experiment specs, versioned registry, presets (CP5)
+packages/runtime/       @faultlab/runtime: Worker protocol, time-sliced Worker core, client with flow control and watchdog (CP5)
+apps/web/               @faultlab/web: React application foundation (Configure / Simulate / Investigate) (CP5)
+tools/perf/             measurement scripts (Node + V8 profilers), not part of the build
   src/                  scheduler, clock, PRNG, network, protocol API, trace, simulation
   src/fixtures/         example protocols (ping, echo-forever)
   test/                 Vitest + fast-check suites; test/reference/ holds the C PRNG oracle
 docs/                   architecture, semantics, determinism, roadmap, ADRs, design direction
 apps/demo/              CP2.5 throwaway trace viewer (Vite + TS + SVG); derive.ts is the reusable part
-apps/web/               (CP5) React + Vite app, simulation in a Web Worker
 ```
 
 ## Documentation

@@ -13,14 +13,21 @@
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ apps/web  (CP5+)   React + Vite                                           │
-│   UI state: selection, panels, playback position, theme, layout          │
-│   Renderers: graph, timeline, trace table, inspector                      │
-│        ▲ trace chunks, run status            │ commands (run, step, …)    │
-│        │ (structured-clone messages,         ▼  validated at boundary)    │
+│ apps/web  (CP5 ✅ foundation; visuals CP6)   React 19 + Vite, MAIN THREAD │
+│   features: Configure │ Simulate │ Investigate · docked PlaybackBar       │
+│   Session (framework-free): RuntimeClient + TraceStore + cursor/follow    │
+│   TraceStore: incremental TraceIndex (@faultlab/trace) · frames per cursor│
+│   React reads Session via useSyncExternalStore, ≤ 1 render per frame      │
+│        ▲ chunk(seq, from, to) · status · finished(fingerprint)            │
+│        │                       │ load(spec) · run · pause · step · stop · │
+│        │  faultlab-worker/1    ▼ credit · snapshot   (runId on every msg) │
 │ ┌──────┴──────────────────────────────────────────────────────────────┐  │
-│ │ Web Worker (CP5+): owns one Simulation; streams trace entries      │  │
+│ │ Web Worker, one per run (@faultlab/runtime WorkerCore):             │  │
+│ │   resolveExperiment(spec) via @faultlab/experiments registry        │  │
+│ │   time-sliced Simulation (whole steps; 8 ms budget) · keyframes     │  │
+│ │   determinism guard per slice · releases sent entries · fingerprint │  │
 │ └──────┬──────────────────────────────────────────────────────────────┘  │
+│        │ main thread: watchdog terminates a silent Worker (→ aborted)    │
 └────────┼──────────────────────────────────────────────────────────────────┘
          │ plain function calls
 ┌────────▼──────────────────────────────────────────────────────────────────┐
@@ -120,13 +127,26 @@ step():
 | Trace reconstruction | `@faultlab/trace` (`TraceIndex`) | a completed trace only; any **entry** |
 | Frontend rendering | `apps/demo` (later `apps/web`) | TraceIndex frames; never engine internals |
 
+## 4.0.1 CP5: execution in a Worker, reconstruction on the main thread
+
+| Concern | Where (CP5) | Thread |
+|---|---|---|
+| Experiment description | `@faultlab/experiments`: JSON `ExperimentSpec`, versioned registry, presets (ADR-0021) | both |
+| Simulation execution | `@faultlab/runtime` `WorkerCore` → engine `Simulation` (ADR-0022) | Worker |
+| Messaging, lifecycle, flow control, watchdog | `@faultlab/runtime` contract + `RuntimeClient` | both |
+| Trace reconstruction | `@faultlab/trace` incremental `TraceIndex` (ADR-0023) | main |
+| State inspection | `apps/web` `Session`, `useFrame` | main |
+| Rendering and animation | `apps/web` components (minimal in CP5; CP6 visual system) | main |
+
+Package dependencies (runtime): `engine` ← `protocols` ← `experiments` ← `runtime` ← `web`; `trace` uses engine types only. No package below `web` imports React (architecture test).
+
 ## 4.1 CP2.5 prototype viewer (`apps/demo`)
 
 A throwaway check that the engine works outside tests. Since CP3 its `derive.ts` is a thin adapter over `@faultlab/trace`. It imports `@faultlab/engine` unchanged, **executes** a bounded experiment synchronously, and then **replays** the finished trace: the view is a pure function of (trace, cursor, display time) computed by `derive.ts`, which has no framework or DOM dependency. No engine internals are read; anything not derivable from the trace is not shown. The real UI (CP5/CP6) replaces everything here except, likely, `derive.ts`.
 
 ## 5. Planned boundaries (not built yet)
 
-- **Worker protocol (CP5).** Versioned discriminated-union messages in both directions, validated on receipt. The worker streams trace entries in chunks; the UI keeps an index of them. The worker never receives UI state.
+- **Worker protocol (CP5): built**, see ADR-0022 and SEMANTICS §19.
 - **Experiment format (CP7).** `{ formatVersion, engineVersion, protocol: {name, version}, config }`, where the config already contains the fault plan. Traces are *not* the shared artefact; inputs are. A trace is re-derived and its fingerprint compared with the stored one to detect engine/protocol drift.
 - **Protocol view adapters (CP5+).** A protocol may export a pure `describe(state) → { role, term, label }` used only by the UI, keeping visual concerns out of the engine and out of protocol logic. CP4's comparison harness already uses the minimal form of this ("is this node leader, in which term?") for both protocols; the Raft data a UI needs is listed in [UI_REQUIREMENTS](UI_REQUIREMENTS.md#raft-visualisation-data-cp4--cp5cp6).
 - **User-supplied protocols (CP10).** Requires its own security architecture ADR (sandboxing, resource limits, determinism guards). Not before.

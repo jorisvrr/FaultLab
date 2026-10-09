@@ -1,0 +1,7 @@
+{
+  // Runs in a Web Worker and on the main thread. No DOM types: the few host APIs used
+  // (postMessage, MessageChannel, TextEncoder/Decoder) are declared in src/host.d.ts.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": [], "noEmit": true },
+  "include": ["src"]
+}

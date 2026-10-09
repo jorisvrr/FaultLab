@@ -1,0 +1,20 @@
+{
+  "name": "@faultlab/experiments",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Serializable experiment specifications, the versioned protocol / invariant / liveness registry, and shared presets for FaultLab.",
+  "license": "MIT",
+  "author": "Joris van Rijn",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@faultlab/engine": "*",
+    "@faultlab/protocols": "*"
+  }
+}

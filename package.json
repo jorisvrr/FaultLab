@@ -13,14 +13,16 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "npm run dev --workspace @faultlab/demo",
-    "test": "npm run test --workspace @faultlab/engine && npm run test --workspace @faultlab/trace && npm run test --workspace @faultlab/protocols && npm run test --workspace @faultlab/demo",
+    "dev": "npm run dev --workspace @faultlab/web",
+    "test": "npm run test --workspace @faultlab/engine && npm run test --workspace @faultlab/trace && npm run test --workspace @faultlab/protocols && npm run test --workspace @faultlab/experiments && npm run test --workspace @faultlab/runtime && npm run test --workspace @faultlab/demo && npm run test --workspace @faultlab/web",
     "test:explore": "npm run test:explore --workspace @faultlab/engine && npm run test:explore --workspace @faultlab/protocols",
     "coverage": "npm run coverage --workspace @faultlab/engine",
-    "typecheck": "npm run typecheck --workspace @faultlab/engine && npm run typecheck --workspace @faultlab/trace && npm run typecheck --workspace @faultlab/protocols && npm run typecheck --workspace @faultlab/demo",
-    "build:demo": "npm run build --workspace @faultlab/demo",
-    "check": "npm run typecheck && npm run test && npm run build:demo",
-    "test:e2e": "npm run test:e2e --workspace @faultlab/demo"
+    "typecheck": "npm run typecheck --workspace @faultlab/engine && npm run typecheck --workspace @faultlab/trace && npm run typecheck --workspace @faultlab/protocols && npm run typecheck --workspace @faultlab/experiments && npm run typecheck --workspace @faultlab/runtime && npm run typecheck --workspace @faultlab/demo && npm run typecheck --workspace @faultlab/web",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "test:e2e": "npm run test:e2e --workspace @faultlab/demo && npm run test:e2e --workspace @faultlab/web",
+    "dev:demo": "npm run dev --workspace @faultlab/demo",
+    "build": "npm run build --workspace @faultlab/demo && npm run build --workspace @faultlab/web",
+    "perf": "cd tools/perf && npx vite build --config vite.config.ts --ssr churn.ts && node .out/churn.mjs 160000"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

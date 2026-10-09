@@ -1,0 +1,1847 @@
+[
+  {
+    "id": "engine-golden-cp0-ping",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 42,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "ping",
+        "version": "1",
+        "options": {
+          "rounds": 3,
+          "interval": 40,
+          "jitter": 25
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 30
+        }
+      }
+    },
+    "reason": "quiescent",
+    "entries": 134,
+    "fingerprint": "7fda34b3"
+  },
+  {
+    "id": "engine-golden-cp1-faults",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2026,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "heartbeat",
+        "version": "1",
+        "options": {
+          "interval": 20,
+          "jitter": 5,
+          "timeout": 60
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 15
+        }
+      },
+      "limits": {
+        "maxTime": 500
+      },
+      "faults": [
+        {
+          "at": 50,
+          "type": "link",
+          "from": "n3",
+          "to": "n4",
+          "loss": 0.3,
+          "delay": {
+            "min": 10,
+            "max": 40
+          }
+        },
+        {
+          "at": 100,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 150,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 220,
+          "type": "recover",
+          "node": "n2"
+        },
+        {
+          "at": 300,
+          "type": "heal"
+        },
+        {
+          "at": 350,
+          "type": "link-restore",
+          "from": "n3",
+          "to": "n4"
+        },
+        {
+          "at": 400,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 400,
+          "type": "recover",
+          "node": "n2"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 1235,
+    "fingerprint": "6a1dfe65"
+  },
+  {
+    "id": "naive-healthy",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 7,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 600,
+        "maxEvents": 20000
+      },
+      "invariants": [
+        {
+          "id": "single-leader",
+          "version": "1"
+        },
+        {
+          "id": "unique-leader-per-epoch",
+          "version": "1"
+        },
+        {
+          "id": "epoch-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "leader-epoch-consistent",
+          "version": "1"
+        },
+        {
+          "id": "no-overdue-messages",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 1168,
+    "fingerprint": "379eb1f6"
+  },
+  {
+    "id": "heartbeat-crash-partition",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2026,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "heartbeat",
+        "version": "1",
+        "options": {
+          "interval": 20,
+          "jitter": 5,
+          "timeout": 60
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 650,
+        "maxEvents": 20000
+      },
+      "faults": [
+        {
+          "at": 150,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 300,
+          "type": "recover",
+          "node": "n2"
+        },
+        {
+          "at": 400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 520,
+          "type": "heal"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 1683,
+    "fingerprint": "30a69d9b"
+  },
+  {
+    "id": "naive-split-brain",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 7,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 1000,
+        "maxEvents": 20000
+      },
+      "faults": [
+        {
+          "at": 300,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        }
+      ],
+      "invariants": [
+        {
+          "id": "single-leader",
+          "version": "1"
+        },
+        {
+          "id": "unique-leader-per-epoch",
+          "version": "1"
+        },
+        {
+          "id": "epoch-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "leader-epoch-consistent",
+          "version": "1"
+        },
+        {
+          "id": "no-overdue-messages",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 663,
+    "fingerprint": "a3cdccf3"
+  },
+  {
+    "id": "raft-healthy",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 1,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "protocol": {
+        "name": "raft-election",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        },
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue",
+      "liveness": [
+        {
+          "id": "raft-leader-elected",
+          "version": "1",
+          "params": {
+            "deadline": 1500
+          }
+        }
+      ],
+      "limits": {
+        "maxTime": 2000
+      }
+    },
+    "reason": "time-limit",
+    "entries": 1172,
+    "fingerprint": "a9825e00"
+  },
+  {
+    "id": "raft-isolate-leader",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 1,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "protocol": {
+        "name": "raft-election",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        },
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue",
+      "liveness": [
+        {
+          "id": "raft-leader-elected",
+          "version": "1",
+          "params": {
+            "deadline": 1500
+          }
+        }
+      ],
+      "limits": {
+        "maxTime": 2000
+      },
+      "faults": [
+        {
+          "at": 400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ],
+            [
+              "n1",
+              "n2",
+              "n3",
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 900,
+          "type": "heal"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 1240,
+    "fingerprint": "4320fef1"
+  },
+  {
+    "id": "raft-split-2-2",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 1,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "raft-election",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        },
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue",
+      "liveness": [
+        {
+          "id": "raft-leader-elected",
+          "version": "1",
+          "params": {
+            "deadline": 1500
+          }
+        }
+      ],
+      "limits": {
+        "maxTime": 2000
+      },
+      "faults": [
+        {
+          "at": 400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1",
+              "n2"
+            ],
+            [
+              "n3",
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 1200,
+          "type": "heal"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 836,
+    "fingerprint": "c626238e"
+  },
+  {
+    "id": "raft-long-heartbeats",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 1,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "protocol": {
+        "name": "raft-election",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        },
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue",
+      "liveness": [
+        {
+          "id": "raft-leader-elected",
+          "version": "1",
+          "params": {
+            "deadline": 1500
+          }
+        }
+      ],
+      "limits": {
+        "maxTime": 200000,
+        "maxEvents": 5000000
+      }
+    },
+    "reason": "time-limit",
+    "entries": 123932,
+    "fingerprint": "d945bb1d"
+  },
+  {
+    "id": "raft-leader-churn",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 1,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "protocol": {
+        "name": "raft-election",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        },
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        },
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue",
+      "liveness": [
+        {
+          "id": "raft-leader-elected",
+          "version": "1",
+          "params": {
+            "deadline": 1500
+          }
+        }
+      ],
+      "limits": {
+        "maxTime": 40000,
+        "maxEvents": 5000000
+      },
+      "faults": [
+        {
+          "at": 400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 900,
+          "type": "heal"
+        },
+        {
+          "at": 1400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 1900,
+          "type": "heal"
+        },
+        {
+          "at": 2400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 2900,
+          "type": "heal"
+        },
+        {
+          "at": 3400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 3900,
+          "type": "heal"
+        },
+        {
+          "at": 4400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 4900,
+          "type": "heal"
+        },
+        {
+          "at": 5400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 5900,
+          "type": "heal"
+        },
+        {
+          "at": 6400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 6900,
+          "type": "heal"
+        },
+        {
+          "at": 7400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 7900,
+          "type": "heal"
+        },
+        {
+          "at": 8400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 8900,
+          "type": "heal"
+        },
+        {
+          "at": 9400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 9900,
+          "type": "heal"
+        },
+        {
+          "at": 10400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 10900,
+          "type": "heal"
+        },
+        {
+          "at": 11400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 11900,
+          "type": "heal"
+        },
+        {
+          "at": 12400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 12900,
+          "type": "heal"
+        },
+        {
+          "at": 13400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 13900,
+          "type": "heal"
+        },
+        {
+          "at": 14400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 14900,
+          "type": "heal"
+        },
+        {
+          "at": 15400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 15900,
+          "type": "heal"
+        },
+        {
+          "at": 16400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 16900,
+          "type": "heal"
+        },
+        {
+          "at": 17400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 17900,
+          "type": "heal"
+        },
+        {
+          "at": 18400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 18900,
+          "type": "heal"
+        },
+        {
+          "at": 19400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 19900,
+          "type": "heal"
+        },
+        {
+          "at": 20400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 20900,
+          "type": "heal"
+        },
+        {
+          "at": 21400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 21900,
+          "type": "heal"
+        },
+        {
+          "at": 22400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 22900,
+          "type": "heal"
+        },
+        {
+          "at": 23400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 23900,
+          "type": "heal"
+        },
+        {
+          "at": 24400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 24900,
+          "type": "heal"
+        },
+        {
+          "at": 25400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 25900,
+          "type": "heal"
+        },
+        {
+          "at": 26400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 26900,
+          "type": "heal"
+        },
+        {
+          "at": 27400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 27900,
+          "type": "heal"
+        },
+        {
+          "at": 28400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 28900,
+          "type": "heal"
+        },
+        {
+          "at": 29400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 29900,
+          "type": "heal"
+        },
+        {
+          "at": 30400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 30900,
+          "type": "heal"
+        },
+        {
+          "at": 31400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 31900,
+          "type": "heal"
+        },
+        {
+          "at": 32400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 32900,
+          "type": "heal"
+        },
+        {
+          "at": 33400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 33900,
+          "type": "heal"
+        },
+        {
+          "at": 34400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 34900,
+          "type": "heal"
+        },
+        {
+          "at": 35400,
+          "type": "partition",
+          "groups": [
+            [
+              "n1"
+            ]
+          ]
+        },
+        {
+          "at": 35900,
+          "type": "heal"
+        },
+        {
+          "at": 36400,
+          "type": "partition",
+          "groups": [
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 36900,
+          "type": "heal"
+        },
+        {
+          "at": 37400,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 37900,
+          "type": "heal"
+        },
+        {
+          "at": 38400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 38900,
+          "type": "heal"
+        },
+        {
+          "at": 39400,
+          "type": "partition",
+          "groups": [
+            [
+              "n5"
+            ]
+          ]
+        },
+        {
+          "at": 39900,
+          "type": "heal"
+        }
+      ]
+    },
+    "reason": "time-limit",
+    "entries": 24243,
+    "fingerprint": "cae3b7d5"
+  },
+  {
+    "id": "cx-naive-leader.crash-only.unique-leader-per-epoch",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 0,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {
+          "interval": 20,
+          "jitter": 5,
+          "timeout": 60
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 1000
+      },
+      "faults": [
+        {
+          "at": 0,
+          "type": "crash",
+          "node": "n1"
+        },
+        {
+          "at": 0,
+          "type": "crash",
+          "node": "n4"
+        },
+        {
+          "at": 71,
+          "type": "recover",
+          "node": "n1"
+        },
+        {
+          "at": 0,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 70,
+          "type": "crash",
+          "node": "n3"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "unique-leader-per-epoch",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 71,
+    "fingerprint": "2205e14a"
+  },
+  {
+    "id": "cx-naive-leader.single-leader",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 11,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {
+          "interval": 20,
+          "jitter": 5,
+          "timeout": 60
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 1000
+      },
+      "faults": [
+        {
+          "at": 150,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        }
+      ],
+      "invariants": [
+        {
+          "id": "single-leader",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 397,
+    "fingerprint": "f1b27acf"
+  },
+  {
+    "id": "cx-naive-leader.unique-leader-per-epoch",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 11,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {
+          "interval": 20,
+          "jitter": 5,
+          "timeout": 60
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 1000
+      },
+      "faults": [
+        {
+          "at": 150,
+          "type": "partition",
+          "groups": [
+            [
+              "n3"
+            ]
+          ]
+        },
+        {
+          "at": 196,
+          "type": "partition",
+          "groups": [
+            [
+              "n3",
+              "n4"
+            ]
+          ]
+        }
+      ],
+      "invariants": [
+        {
+          "id": "unique-leader-per-epoch",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 459,
+    "fingerprint": "35340100"
+  },
+  {
+    "id": "cx-raft.ceil-half-majority.raft-election-safety",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2989984903,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:ceil-half-majority",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 0,
+          "type": "partition",
+          "groups": [
+            [
+              "n1",
+              "n2"
+            ],
+            [
+              "n3",
+              "n4"
+            ]
+          ]
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 84,
+    "fingerprint": "7d9c3383"
+  },
+  {
+    "id": "cx-raft.ceil-half-majority.raft-leader-has-quorum",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 0,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:ceil-half-majority",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [],
+      "invariants": [
+        {
+          "id": "raft-leader-has-quorum",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 35,
+    "fingerprint": "44751c0e"
+  },
+  {
+    "id": "cx-raft.double-vote.raft-election-safety",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2911200105,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:double-vote",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 25
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [],
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 60,
+    "fingerprint": "02478510"
+  },
+  {
+    "id": "cx-raft.double-vote.raft-one-vote-per-term",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2911200104,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:double-vote",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 25
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [],
+      "invariants": [
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 36,
+    "fingerprint": "b020db59"
+  },
+  {
+    "id": "cx-raft.ignore-higher-term.raft-term-adoption",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 0,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:ignore-higher-term",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [],
+      "invariants": [
+        {
+          "id": "raft-term-adoption",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 20,
+    "fingerprint": "62bdc088"
+  },
+  {
+    "id": "cx-raft.no-step-down.raft-election-safety",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 162726398,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:no-step-down",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 25
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 369,
+          "type": "partition",
+          "groups": [
+            [
+              "n1",
+              "n3",
+              "n4",
+              "n5"
+            ],
+            [
+              "n2"
+            ]
+          ]
+        },
+        {
+          "at": 0,
+          "type": "partition",
+          "groups": [
+            [
+              "n3",
+              "n4",
+              "n5"
+            ],
+            [
+              "n1",
+              "n2"
+            ]
+          ]
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 179,
+    "fingerprint": "ee240095"
+  },
+  {
+    "id": "cx-raft.volatile-term.raft-election-safety",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 3393420544,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:volatile-term",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 950,
+          "type": "recover",
+          "node": "n3"
+        },
+        {
+          "at": 900,
+          "type": "crash",
+          "node": "n1"
+        },
+        {
+          "at": 1104,
+          "type": "recover",
+          "node": "n1"
+        },
+        {
+          "at": 0,
+          "type": "link",
+          "from": "n2",
+          "to": "n3",
+          "loss": 0.2
+        },
+        {
+          "at": 0,
+          "type": "crash",
+          "node": "n3"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 231,
+    "fingerprint": "1f70322d"
+  },
+  {
+    "id": "cx-raft.volatile-term.raft-term-monotonic",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 4259442735,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:volatile-term",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 25
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 211,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 211,
+          "type": "recover",
+          "node": "n2"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-term-monotonic",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 26,
+    "fingerprint": "63a86602"
+  },
+  {
+    "id": "cx-raft.volatile-voted-for.raft-election-safety",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 3393420544,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:volatile-voted-for",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 950,
+          "type": "recover",
+          "node": "n3"
+        },
+        {
+          "at": 900,
+          "type": "crash",
+          "node": "n1"
+        },
+        {
+          "at": 1104,
+          "type": "recover",
+          "node": "n1"
+        },
+        {
+          "at": 0,
+          "type": "link",
+          "from": "n2",
+          "to": "n3",
+          "loss": 0.2
+        },
+        {
+          "at": 0,
+          "type": "crash",
+          "node": "n3"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-election-safety",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 230,
+    "fingerprint": "dd636e7e"
+  },
+  {
+    "id": "cx-raft.volatile-voted-for.raft-one-vote-per-term",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 13,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "protocol": {
+        "name": "raft-election/bug:volatile-voted-for",
+        "version": "1",
+        "options": {
+          "electionTimeout": {
+            "min": 150,
+            "max": 155
+          }
+        }
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 2500
+      },
+      "faults": [
+        {
+          "at": 151,
+          "type": "crash",
+          "node": "n1"
+        },
+        {
+          "at": 151,
+          "type": "recover",
+          "node": "n1"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "raft-one-vote-per-term",
+          "version": "1"
+        }
+      ]
+    },
+    "reason": "invariant-violation",
+    "entries": 41,
+    "fingerprint": "44ad6268"
+  }
+]

@@ -8,8 +8,15 @@
  * Encoding is done by hand because TextEncoder is not part of the ECMAScript standard
  * library the engine is compiled against (see tsconfig.json).
  */
+export const FNV1A32_OFFSET = 0x811c9dc5;
+
 export function fnv1a32(text: string): number {
-  let hash = 0x811c9dc5;
+  return fnv1a32Update(FNV1A32_OFFSET, text);
+}
+
+/** Continue an FNV-1a 32 hash with more text: fnv1a32(a + b) === fnv1a32Update(fnv1a32(a), b). */
+export function fnv1a32Update(state: number, text: string): number {
+  let hash = state;
   const mix = (byte: number): void => {
     hash ^= byte;
     hash = Math.imul(hash, 0x01000193);

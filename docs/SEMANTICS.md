@@ -373,6 +373,8 @@ Three different things carry version information. They change for different reas
 | **Trace format** | implied by the engine version; history in §12 | The shape of trace entries | Entries or fields are added. Always together with an engine-version bump (today the two are not separated) |
 | **Snapshot format** (`SNAPSHOT_FORMAT` = `faultlab-snapshot/2` since CP4) | `snapshot.format` | The shape of an engine snapshot | The snapshot schema changes. Independent of the engine version |
 | **Counterexample format** (`faultlab-counterexample/1`, `/2`) | stored fixtures | The shape of a stored, replayable counterexample (§18) | The fixture schema changes |
+| **Experiment spec format** (`faultlab-experiment/1`, CP5) | `ExperimentSpec.format` | The JSON shape that names protocol, invariants and liveness checks by registry (id, version) (§19) | The spec schema changes |
+| **Worker protocol** (`faultlab-worker/1`, CP5) | every Worker message | The command/event contract between the main thread and the simulation Worker (§19) | Messages change; both sides reject other versions |
 | **Protocol / invariant / liveness-check versions** | `protocol.version`, `invariant.version`, `check.version` | The rules of that protocol or check | Its rule or its history shape changes |
 | *Package versions* (`package.json`, `0.0.0`) | npm workspaces | Nothing yet (private packages) | Not used |
 
@@ -422,4 +424,26 @@ Design: [ADR-0019](adr/0019-bounded-liveness.md). Safety ("nothing bad happens")
 | `faultlab-counterexample/2` (CP4) | Raft fixtures, `packages/protocols/test/counterexamples/` | as `/1`, plus `protocol.variant` (a deliberate bug, or `null`) from a protocol registry, protocol options, and `correctProtocol {reason, violations, fingerprint}`: what the correct protocol does under the identical experiment |
 
 Both are replayed by tests that require the exact recorded violation and fingerprint, 1-minimality of the fault plan, and matching engine, protocol and invariant versions. A fixture is written only if it does not exist yet; it is never overwritten.
+
+## 19. Browser execution: experiment specs and the Worker protocol (CP5)
+
+Design: [ADR-0021](adr/0021-experiment-spec-and-registry.md), [ADR-0022](adr/0022-worker-runtime.md), [ADR-0023](adr/0023-incremental-trace-index.md).
+
+**Experiment spec** (`faultlab-experiment/1`): `{ format, seed, nodes, protocol {name, version, options}, network {latency}, limits?, faults?, invariants? [{id, version}], invariantPolicy?, liveness? [{id, version, params}] }`, plain JSON. `resolveExperiment(spec)` looks every name up in the registry at exactly that version (else `SpecError` with a path), then validates the resulting config with the engine's `resolveConfig`. A spec never contains code.
+
+**Worker protocol** (`faultlab-worker/1`), one Worker per run, every message `{ protocol, runId, type, … }`:
+
+| Direction | Message | Meaning |
+|---|---|---|
+| → Worker | `load {spec, options}` | resolve and create the run (once per Worker) |
+| → Worker | `run` / `step {steps}` / `pause` / `stop` | execution control; pause and stop take effect at the next step boundary |
+| → Worker | `credit {chunks}` | flow control: the client applied chunks |
+| → Worker | `snapshot {requestId, atStep}` | engine snapshot at a step boundary (current, or rebuilt from a keyframe) |
+| ← main | `loaded {engineVersion, protocolName, protocolVersion}` | spec resolved |
+| ← main | `chunk {seq, from, to, encoding, entries \| data}` | entries [from, to); `seq` counts from 0 without gaps |
+| ← main | `status {state, stepsCompleted, now, traceLength, pendingEvents, stopReason, throttled}` | after load and every slice |
+| ← main | `finished {state, stopReason, stepsCompleted, traceLength, fingerprint, metrics}` | all entries were sent before it |
+| ← main | `snapshot` / `error {code, message}` | replies and failures |
+
+**Execution guarantees.** Slices contain whole steps only; the trace does not depend on slice budget, slice size, chunk size, credit, encoding, or when the user pauses (property-tested; identical fingerprints in Node, Chromium, Firefox and WebKit). The client applies chunks only in order, without gaps or duplicates, and ignores messages of other runs. Lifecycle states and the difference between `completed`, `stopped` and `aborted` are defined in ADR-0022. Inside slices, ambient nondeterminism APIs throw (`NondeterminismError` → a deterministic handler error); this is an accident guard, not a sandbox.
 

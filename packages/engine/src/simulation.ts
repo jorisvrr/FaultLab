@@ -172,9 +172,18 @@ export class Simulation<S extends JsonValue = JsonValue, M extends JsonValue = J
     return this.#stopReason;
   }
 
-  /** Frozen copy of the trace so far. */
+  /** Frozen copy of the trace so far. O(length): for streaming, use `entriesSince`. */
   get trace(): readonly TraceEntry[] {
     return this.#trace.snapshot();
+  }
+
+  /**
+   * The retained entries from absolute index `from` to the end (CP5), as a frozen array. Costs
+   * O(new entries), so a Worker can stream a growing trace without copying it every time. Throws
+   * a RangeError if `from` is not retained (released) or beyond the end.
+   */
+  entriesSince(from: EntryIndex): readonly TraceEntry[] {
+    return this.#trace.range(from, this.#trace.length);
   }
 
   /** Scheduler diagnostics: live events, physical heap entries, compactions (ADR-0011). */

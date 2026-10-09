@@ -22,6 +22,17 @@ No runtime dependencies. It imports only TypeScript **types** from `@faultlab/en
 
 No runtime dependencies. It imports only TypeScript **types** from `@faultlab/engine`; an architecture test enforces this and forbids `Math.random`, `Date`, `performance`, timers and `process` in its source. Its tests use the root `fast-check` and `vitest`, plus `@faultlab/engine` (runtime, tests only) and `@faultlab/trace` (TraceIndex cross-checks). No new third-party package was added in CP4. `immer` was reconsidered for Raft's state updates and again not adopted: Raft's state is small, and plain spreads keep the copy semantics visible.
 
+## CP5 (`packages/experiments`, `packages/runtime`, `apps/web`)
+
+| Package | Version | License | Where | Why |
+|---|---|---|---|---|
+| `react`, `react-dom` | ^19.3.0 | MIT | `apps/web` (dependency) | Approved UI framework for the application shell. Never imported by engine, trace, protocols, experiments or runtime (architecture test) |
+| `@types/react`, `@types/react-dom` | ^19.3.0 | MIT | `apps/web` (dev) | Types |
+| `@playwright/test` | ^1.64.0 | Apache-2.0 | `apps/web` (dev) | Browser tests; same version as the demo |
+| Playwright Firefox 157.0 / WebKit 27.2 builds | via `npx playwright install firefox webkit` | MPL-2.0 / BSD-style (browser engines; downloaded to the user cache, never shipped) | test machines only | Cross-engine determinism and Worker tests (approved in CP5). Chromium tests use the locally installed Chrome |
+
+Deliberately **not** added: `@vitejs/plugin-react` (Vite 8 compiles TSX itself; no fast refresh needed), a router (three hash-routed modes), a state library (one external store with `useSyncExternalStore`), a schema library (hand-written validation of a small contract), Comlink (we need to see and test the messages), jsdom/testing-library (UI behaviour is tested in real browsers; logic lives in framework-free stores tested in Node). `@faultlab/experiments` and `@faultlab/runtime` have only workspace dependencies.
+
 ## CP2.5 demo (`apps/demo` devDependencies/dependencies; never engine dependencies)
 
 | Package | Version | License | Why |
