@@ -229,6 +229,85 @@
     "fingerprint": "30a69d9b"
   },
   {
+    "id": "configure-reference",
+    "spec": {
+      "format": "faultlab-experiment/1",
+      "seed": 2026,
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "protocol": {
+        "name": "naive-leader",
+        "version": "1",
+        "options": {}
+      },
+      "network": {
+        "latency": {
+          "min": 1,
+          "max": 10
+        }
+      },
+      "limits": {
+        "maxTime": 1000,
+        "maxEvents": 20000
+      },
+      "faults": [
+        {
+          "at": 150,
+          "type": "crash",
+          "node": "n2"
+        },
+        {
+          "at": 400,
+          "type": "partition",
+          "groups": [
+            [
+              "n4"
+            ]
+          ]
+        },
+        {
+          "at": 650,
+          "type": "recover",
+          "node": "n2"
+        },
+        {
+          "at": 900,
+          "type": "heal"
+        }
+      ],
+      "invariants": [
+        {
+          "id": "single-leader",
+          "version": "1"
+        },
+        {
+          "id": "unique-leader-per-epoch",
+          "version": "1"
+        },
+        {
+          "id": "epoch-monotonic",
+          "version": "1"
+        },
+        {
+          "id": "leader-epoch-consistent",
+          "version": "1"
+        },
+        {
+          "id": "no-overdue-messages",
+          "version": "1"
+        }
+      ],
+      "invariantPolicy": "record-and-continue"
+    },
+    "reason": "time-limit",
+    "entries": 1538,
+    "fingerprint": "6dfb02d2"
+  },
+  {
     "id": "naive-split-brain",
     "spec": {
       "format": "faultlab-experiment/1",

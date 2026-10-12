@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { NodeSprite } from './types';
 
 /**
@@ -12,9 +13,15 @@ export interface NodeOverlayProps {
   readonly describe: (node: NodeSprite) => string;
   readonly onHover?: (id: string | null) => void;
   readonly onSelect?: (id: string) => void;
+  /**
+   * Extra DOM content pinned to a node, for annotations that are NOT protocol state — a count
+   * of scheduled faults, for instance. Kept out of the visual state channels on purpose, so a
+   * plan can never be mistaken for something the simulation produced.
+   */
+  readonly badge?: (node: NodeSprite) => ReactNode;
 }
 
-export function NodeOverlay({ nodes, labels, describe, onHover, onSelect }: NodeOverlayProps) {
+export function NodeOverlay({ nodes, labels, describe, onHover, onSelect, badge }: NodeOverlayProps) {
   return (
     <div className="stage-overlay">
       {nodes.map((n) => (
@@ -38,6 +45,7 @@ export function NodeOverlay({ nodes, labels, describe, onHover, onSelect }: Node
               {n.label ?? n.id}
             </span>
           )}
+          {badge?.(n)}
         </button>
       ))}
     </div>

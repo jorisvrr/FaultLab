@@ -4,6 +4,7 @@ export {
   findLiveness,
   findProtocol,
   INVARIANTS,
+  invariantsFor,
   LIVENESS,
   PROTOCOLS,
   type InvariantEntry,

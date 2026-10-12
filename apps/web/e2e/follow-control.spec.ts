@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { PRESETS } from '@faultlab/experiments';
 import { lifecycle, openPreset, watchErrors } from './helpers';
 
 /**
@@ -113,9 +114,12 @@ test('the follow-live checkbox shows the intended state immediately, in every si
 
   // Switching runs: a newly loaded run follows its newest entry, without a flash of the old state.
   await expect(lifecycle(page)).toHaveAttribute('data-state', 'completed', { timeout: 60_000 });
-  await page.getByTestId('mode-configure').click();
-  await page.getByTestId('choose-raft-isolate-leader').click();
-  all(await samples(page, 'document.querySelector(\'[data-testid="load"]\').click()'), true);
+  // The next run is loaded through the Session, staying in Simulate so the checkbox stays mounted
+  // for every sample. What is under test is the Session → React sync when one run replaces
+  // another; Configure's own navigation is covered by configure.spec.ts.
+  const next = PRESETS.find((p) => p.id === 'raft-isolate-leader')!;
+  await page.evaluate((spec) => ((globalThis as any).nextSpec = spec), next.spec as unknown);
+  all(await samples(page, 'globalThis.faultlab.session.load(globalThis.nextSpec, { id: "raft-isolate-leader", title: "switched run", summary: "", category: "education" })'), true);
   await expect(lifecycle(page)).toHaveAttribute('data-state', 'ready');
   all(await samples(page, 'globalThis.clickFollow()'), false);
   all(await samples(page, 'document.querySelector(\'[data-testid="restart"]\').click()'), true);

@@ -200,10 +200,13 @@ export interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   readonly label: ReactNode;
   /** Puts the label before the track, as the reference's invariant cards do. */
   readonly labelFirst?: boolean;
+  /** Keeps the accessible name but hides it, where the surrounding text already names it. */
+  readonly hideLabel?: boolean;
 }
 
 /** A real checkbox: Space toggles it, forms see it, screen readers announce its state. */
-export function Switch({ label, labelFirst = false, disabled, className, ...rest }: SwitchProps) {
+export function Switch({ label, labelFirst = false, hideLabel = false, disabled, className, ...rest }: SwitchProps) {
+  const text = <span className={hideLabel ? 'sr-only' : undefined}>{label}</span>;
   const id = useId();
   const track = (
     <span className={styles.switchControl}>
@@ -215,9 +218,9 @@ export function Switch({ label, labelFirst = false, disabled, className, ...rest
   );
   return (
     <label className={[styles.switch, className].filter(Boolean).join(' ')} htmlFor={id} data-disabled={disabled === true}>
-      {labelFirst && <span>{label}</span>}
+      {labelFirst && text}
       {track}
-      {!labelFirst && <span>{label}</span>}
+      {!labelFirst && text}
     </label>
   );
 }

@@ -1,0 +1,59 @@
+/*
+ * The stage's own layout and DOM overlay. It ships with the component rather than with a page,
+ * so every consumer (the application, the prototype gallery) gets the same behaviour — these
+ * rules lived only in the prototype's stylesheet at first, and the nodes had no layout at all
+ * the moment the stage was used anywhere else.
+ */
+.stage {
+  position: absolute;
+  inset: 0;
+  /* The nodes are placed in pixels from this box, so it must be the positioning context. */
+  contain: layout;
+}
+.stage-canvas,
+.stage-flat {
+  position: absolute !important;
+  inset: 0;
+}
+.stage-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.stage-node {
+  position: absolute;
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+}
+/* Keyboard focus: a crisp blue ring outside the selection ring (DOM, every tier). */
+.stage-node:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 0.5em;
+}
+.stage-node:focus:not(:focus-visible) {
+  outline: none;
+}
+.stage-node__label {
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  text-shadow: 0 0 6px rgb(0 0 0 / 0.6);
+}
+.stage-node__label--below {
+  position: absolute;
+  top: calc(100% + 12px);
+}
+.stage-node__crown {
+  display: block;
+  color: var(--amber);
+  font-size: 0.55em;
+  line-height: 1;
+  text-align: center;
+}

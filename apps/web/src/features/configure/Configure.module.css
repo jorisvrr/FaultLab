@@ -1,0 +1,624 @@
+/*
+ * Configure. Geometry from the measured reference (docs/CP6_DESIGN_AUDIT.md §2.1), expressed
+ * as fractions so it scales rather than pinning 1586 px:
+ *   left panel   x  31– 400  (369 / 1586 = 23.3 %)
+ *   centre stage x 417–1170  (753 / 1586 = 47.5 %)
+ *   right panel  x1187–1558  (371 / 1586 = 23.4 %)
+ *   gutters 17 px, outer margin 30 px, panels y78–935.
+ */
+.configure {
+  display: grid;
+  grid-template-columns: 23.3fr 47.5fr 23.4fr;
+  gap: var(--space-gutter);
+  height: 100%;
+  min-height: 0;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-gutter);
+}
+
+/* The left column: setup card above, CTA pinned below, as in the reference. */
+.setup {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.setupBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.rowSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cta {
+  flex: none;
+}
+
+/* ── centre stage ────────────────────────────────────────────────────────────────────────── */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stageLegend {
+  position: absolute;
+  left: var(--space-5);
+  bottom: var(--space-3);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+}
+
+.stageCanvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The faint vertical hairlines inside the stage, as in the reference. */
+.stageGrid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(90deg, rgb(255 255 255 / 0.03) 1px, transparent 1px);
+  background-size: 11.4% 100%;
+  mask-image: linear-gradient(180deg, transparent, #000 14%, #000 86%, transparent);
+  pointer-events: none;
+}
+
+/* The orbit circle behind the topology. */
+.stageOrbit {
+  position: absolute;
+  inset: 0;
+  color: rgb(255 255 255 / 0.055);
+  pointer-events: none;
+}
+
+.stageCaption {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+/* ── fault plan timeline, under the stage ────────────────────────────────────────────────── */
+.plan {
+  flex: none;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+}
+
+.planHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.planTitle {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.planHint {
+  margin-left: auto;
+  font-size: var(--type-micro-size);
+  color: var(--color-text-subtle);
+}
+
+/* A disabled plan must be visibly distinct, never silently discarded. */
+.planDisabled {
+  opacity: 0.4;
+  filter: saturate(0.25);
+}
+
+.planEmpty {
+  padding: var(--space-4) 0;
+  font-size: var(--type-body-size);
+  color: var(--color-text-subtle);
+}
+
+/* ── right column ────────────────────────────────────────────────────────────────────────── */
+.invariants {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Scroll affordance for the invariant list: a soft fade at the panel's foot, shown only while
+ * there is more to reach. It sits over the list, never over the panel's own padding, and is
+ * purely visual — every card stays reachable by wheel, touch and keyboard regardless.
+ */
+.invariantMore {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 72px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--motion-ease);
+  background: linear-gradient(180deg, rgb(10 11 12 / 0) 0%, rgb(10 11 12 / 0.72) 46%, rgb(10 11 12 / 0.95) 100%);
+}
+.invariantMore[data-visible='true'] {
+  opacity: 1;
+}
+/* A small chevron inside the fade, so the cue is not carried by a gradient alone. */
+/* Off to the side: centred, it sat on top of the partially visible card's title. */
+.invariantMore::after {
+  content: '';
+  position: absolute;
+  right: 18px;
+  bottom: 11px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--color-text-subtle);
+  border-bottom: 1.5px solid var(--color-text-subtle);
+  transform: rotate(45deg);
+}
+
+.invariantList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* The reference's card is 335 × 131 inside a 371-wide panel. */
+.sigInvalid {
+  color: var(--color-state-violation);
+}
+
+.invariantCard {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-4);
+  min-height: 131px;
+  align-content: center;
+}
+
+.invariantIcon {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 44px;
+  height: 44px;
+  border-right: 1px solid var(--color-divider);
+  color: var(--color-text-muted);
+}
+.invariantIconOn {
+  color: var(--color-accent);
+}
+
+.invariantBody {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+
+.invariantTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--type-card-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+
+.invariantSwitch {
+  margin-left: auto;
+}
+
+.invariantText {
+  margin: 0;
+  font-size: var(--type-body-size);
+  color: var(--color-text-subtle);
+}
+
+.signature {
+  flex: none;
+}
+
+/* ── fault editor drawer ─────────────────────────────────────────────────────────────────── */
+.faultList {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.faultRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+}
+.faultRowSelected {
+  border-color: var(--color-accent-dim);
+  box-shadow: inset 0 0 0 1px var(--color-accent-dim);
+}
+
+.faultAt {
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.faultWhat {
+  font-family: var(--font-mono);
+  font-size: var(--type-label-size);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.faultActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.editor {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-raised);
+}
+
+.editorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.groupPicker {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.groupRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.groupLabel {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  letter-spacing: var(--type-tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  min-width: 92px;
+}
+
+.nodeToggle {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-control);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--type-card-size);
+  cursor: pointer;
+}
+.nodeToggleOn {
+  border-color: var(--color-accent-dim);
+  background: var(--color-accent-surface);
+  color: var(--color-accent);
+}
+
+.warnings {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgb(248 199 129 / 0.3);
+  border-radius: var(--radius-control);
+}
+
+.warning {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--type-body-size);
+  color: var(--color-state-fault);
+}
+
+.errors {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.errorItem {
+  font-family: var(--font-mono);
+  font-size: var(--type-card-size);
+  color: var(--color-state-violation);
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .configure {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 40%) minmax(0, 1fr);
+  }
+  .stageColumn {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .leftColumn {
+    grid-row: 2;
+  }
+  .rightColumn {
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .configure {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto;
+    overflow-y: auto;
+  }
+  .stageColumn,
+  .leftColumn,
+  .rightColumn {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  /* The preview never takes space the controls need. The floor belongs on the canvas, not on the
+     column: the column also holds the fault plan, so a floor there left the preview itself about
+     94px tall, with the nodes shrunk into the caption. */
+  .stage {
+    flex: none;
+  }
+  .stageLegend {
+  position: absolute;
+  left: var(--space-5);
+  bottom: var(--space-3);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+}
+
+.stageCanvas {
+    min-height: 280px;
+    flex: none;
+  }
+  .setupBody,
+  .invariantList {
+    overflow: visible;
+  }
+  .column {
+    min-height: 0;
+  }
+}
+
+/* The complete graph beneath the nodes: thin, bright, with a junction dot at each rim. */
+.links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.links line {
+  stroke: #c2d1e3;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.5;
+  filter: drop-shadow(0 0 3px rgb(194 209 227 / 0.4));
+}
+
+/*
+ * A scheduled-fault count pinned to a node. Amber, because the plan is about faults, but a
+ * DOM badge rather than a visual state channel: a preview must never look like a result.
+ */
+/*
+ * The node badge is anchored to its node; the legend swatch is the same chip laid out inline.
+ * They share every visual property and differ only in positioning, so the legend cannot drift
+ * away from what it explains.
+ */
+.plannedBadge,
+.legendSwatch {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgb(248 199 129 / 0.5);
+  background: rgb(10 9 7 / 0.9);
+  color: var(--color-state-fault);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.plannedBadge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+}
+
+.legendSwatch {
+  position: static;
+}
+
+/*
+ * The scheduled fault plan, drawn as the reference does: an icon badge above the axis, a dashed
+ * stem down to it, and the fault's name below. Geometry from the reference: icon rings r ≈ 24
+ * at y 698, axis at y 783, labels beneath.
+ */
+.planChart {
+  position: relative;
+  height: 132px;
+  margin: 0 var(--space-2);
+}
+
+/* Fine graduations along the axis, as in the reference. */
+.planRule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 68px;
+  height: 7px;
+  background-image: linear-gradient(90deg, var(--color-border) 1px, transparent 1px);
+  background-size: 2.5% 100%;
+  opacity: 0.8;
+}
+
+.planAxis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 72px;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.planTick {
+  position: absolute;
+  top: 68px;
+  translate: -50% 0;
+  width: 1px;
+  height: 9px;
+  background: var(--color-border-strong);
+}
+
+.planTickLabel {
+  position: absolute;
+  /* Below the fault names, so a tick never collides with a label. */
+  top: 116px;
+  translate: -50% 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.planMark {
+  position: absolute;
+  top: 0;
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  width: 86px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-state-fault);
+  cursor: pointer;
+}
+
+.planBadge {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  background: radial-gradient(70% 70% at 50% 30%, rgb(248 199 129 / 0.14), rgb(0 0 0 / 0) 70%);
+  box-shadow: 0 0 18px -6px currentColor;
+  transition: box-shadow var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease);
+}
+.planBadgeRecovery {
+  color: var(--color-state-recovery);
+  background: radial-gradient(70% 70% at 50% 30%, rgb(173 200 254 / 0.16), rgb(0 0 0 / 0) 70%);
+}
+.planMark[data-tone='recovery'] {
+  color: var(--color-state-recovery);
+}
+.planMark:hover .planBadge {
+  box-shadow: 0 0 22px -4px currentColor;
+  transform: translateY(-1px);
+}
+
+/* The dashed drop line from the badge to the axis. */
+.planStem {
+  width: 1px;
+  height: 27px;
+  background: repeating-linear-gradient(180deg, currentColor 0 3px, transparent 3px 6px);
+  opacity: 0.55;
+}
+
+.planDot {
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px -1px currentColor;
+}
+
+.planName {
+  margin-top: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--type-card-size);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}

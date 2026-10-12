@@ -54,7 +54,31 @@ export interface InvariantEntry {
   readonly invariant: Invariant;
   /** Protocols it is meant for (documentation and UI suggestions only). */
   readonly protocols: readonly string[];
+  /**
+   * One sentence describing what the check actually tests, for the UI. It lives here, in the
+   * UI-facing registry, rather than on the `Invariant` itself, so the engine's contract is
+   * unchanged. Each one is derived from that invariant's own rule; none of them claims more
+   * than the rule checks.
+   */
+  readonly description: string;
 }
+
+/**
+ * Descriptions by invariant id. Raft's entries describe LEADER ELECTION only (CP4): there is no
+ * log replication in this engine, so none of them may be read as full Raft consensus.
+ */
+const DESCRIPTIONS: Readonly<Record<string, string>> = {
+  'single-leader': 'At any single moment, at most one running node considers itself the leader.',
+  'unique-leader-per-epoch': 'Across the whole run, no two different nodes ever lead the same epoch.',
+  'epoch-monotonic': 'Within one incarnation, a node’s epoch never decreases; a crash and restart may reset it.',
+  'leader-epoch-consistent': 'A leader’s epoch is positive and never higher than the highest epoch it has seen.',
+  'no-overdue-messages': 'No message stays in flight past its delivery time (a sanity check on the engine itself).',
+  'raft-election-safety': 'At most one node is elected leader in any given term, across the whole run.',
+  'raft-term-monotonic': 'A node’s term never decreases, including across a crash and restart.',
+  'raft-one-vote-per-term': 'A node grants its vote to at most one candidate per term, including across a crash.',
+  'raft-leader-has-quorum': 'Every elected leader actually received votes from a majority of distinct nodes.',
+  'raft-term-adoption': 'After processing a message carrying a higher term, a node adopts at least that term.',
+};
 
 export interface LivenessEntry {
   readonly id: string;
@@ -195,9 +219,12 @@ export const PROTOCOLS: readonly ProtocolEntry[] = Object.freeze([
 ] satisfies ProtocolEntry[]);
 
 export const INVARIANTS: readonly InvariantEntry[] = Object.freeze([
-  ...naiveLeaderInvariants.map((invariant) => ({ invariant, protocols: ['naive-leader'] })),
-  ...raftInvariants.map((invariant) => ({ invariant, protocols: ['raft-election'] })),
+  ...naiveLeaderInvariants.map((invariant) => ({ invariant, protocols: ['naive-leader'], description: DESCRIPTIONS[invariant.id] ?? invariant.name })),
+  ...raftInvariants.map((invariant) => ({ invariant, protocols: ['raft-election'], description: DESCRIPTIONS[invariant.id] ?? invariant.name })),
 ]);
+
+/** Invariants registered for a protocol, in evaluation order. Empty for ping and heartbeat. */
+export const invariantsFor = (protocolName: string): readonly InvariantEntry[] => INVARIANTS.filter((e) => e.protocols.includes(protocolName));
 
 export const LIVENESS: readonly LivenessEntry[] = Object.freeze([
   {

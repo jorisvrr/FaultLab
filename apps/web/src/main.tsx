@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { SessionContext } from './app/session-context';
 import { Session } from './state/session';
+import './design/base.css';
 import './styles.css';
 
 /**

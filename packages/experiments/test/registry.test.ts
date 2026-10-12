@@ -1,7 +1,7 @@
 import { fingerprintTrace, runSimulation, type TraceEntry } from '@faultlab/engine';
 import { createNaiveLeaderProtocol, naiveLeaderInvariants } from '@faultlab/engine/fixtures';
 import { describe, expect, it } from 'vitest';
-import { EXPERIMENT_SPEC_FORMAT, findProtocol, INVARIANTS, LIVENESS, PRESETS, PROTOCOLS, resolveExperiment, specFingerprint, SpecError, type ExperimentSpec } from '../src';
+import { EXPERIMENT_SPEC_FORMAT, findProtocol, INVARIANTS, invariantsFor, LIVENESS, PRESETS, PROTOCOLS, resolveExperiment, specFingerprint, SpecError, type ExperimentSpec } from '../src';
 
 const base: ExperimentSpec = {
   format: EXPERIMENT_SPEC_FORMAT,
@@ -25,6 +25,25 @@ describe('registry', () => {
   it('labels test-only entries: broken variants and diagnostics are never plain protocols', () => {
     expect(PROTOCOLS.filter((p) => p.name.includes('/bug:')).every((p) => p.category === 'broken-variant')).toBe(true);
     expect(findProtocol('diagnostic-spin', '1')?.category).toBe('diagnostic');
+  });
+
+  it('describes every invariant it registers, without overstating what Raft checks', () => {
+    for (const entry of INVARIANTS) {
+      expect(entry.description.length, `${entry.invariant.id} has no description`).toBeGreaterThan(20);
+      expect(entry.description.endsWith('.'), `${entry.invariant.id}: description must be a sentence`).toBe(true);
+    }
+    // CP4 implements leader election only; no description may suggest log replication or
+    // full consensus (see docs/RAFT.md).
+    const forbidden = /log replication|replicated log|state machine safety|full raft|consensus/i;
+    const overstated = INVARIANTS.filter((e) => forbidden.test(e.description)).map((e) => e.invariant.id);
+    expect(overstated, 'descriptions must not claim more than the rule checks').toEqual([]);
+  });
+
+  it('lists the invariants available for a protocol, and none for protocols without any', () => {
+    expect(invariantsFor('naive-leader').map((e) => e.invariant.id)).toEqual(['single-leader', 'unique-leader-per-epoch', 'epoch-monotonic', 'leader-epoch-consistent', 'no-overdue-messages']);
+    expect(invariantsFor('raft-election')).toHaveLength(5);
+    expect(invariantsFor('heartbeat')).toEqual([]);
+    expect(invariantsFor('ping')).toEqual([]);
   });
 
   it('registers invariants and liveness checks under unique (id, version)', () => {
@@ -92,5 +111,29 @@ describe('presets', () => {
     const healthy = run('raft-healthy').trace;
     expect(healthy.find((e) => e.kind === 'state.update' && (e.state as { role: string }).role === 'leader')).toMatchObject({ node: 'n5', time: 202 });
     expect(run('diagnostic-echo-forever').reason).toBe('event-limit');
+  });
+
+  /**
+   * `configure-reference` is the deterministic scenario the Configure screen and its visual
+   * regression tests are built on, so its outcome is pinned here. The fingerprint is regression
+   * evidence for THIS preset; it says nothing about a user's future run.
+   */
+  it('configure-reference tells its documented story and keeps its fingerprint', () => {
+    const result = run('configure-reference');
+    expect(result.reason).toBe('time-limit');
+    expect(result.finalTime).toBe(999);
+    expect(result.trace).toHaveLength(1538);
+
+    // All four scheduled faults actually execute, in order.
+    const faults = result.trace.filter((e) => ['node.crash', 'network.partition', 'node.recover', 'network.heal'].includes(e.kind));
+    expect(faults.map((e) => `${e.kind}@${e.time}`)).toEqual(['node.crash@150', 'network.partition@400', 'node.recover@650', 'network.heal@900']);
+
+    // One real violation: the naive protocol's split brain, recorded rather than stopped.
+    const found = violations(result.trace);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ time: 477, observed: '2 running nodes are leader: n3, n4' });
+    expect((found[0] as { invariant: { id: string } }).invariant.id).toBe('single-leader');
+
+    expect(fingerprintTrace(result.trace)).toBe('6dfb02d2');
   });
 });

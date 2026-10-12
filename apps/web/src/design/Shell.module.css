@@ -2,7 +2,7 @@
 
 .shell {
   display: grid;
-  grid-template-rows: var(--header-height) minmax(0, 1fr) auto;
+  grid-template-rows: minmax(var(--header-height), auto) minmax(0, 1fr) auto;
   height: 100dvh;
   position: relative;
   isolation: isolate;
@@ -223,11 +223,37 @@
   }
 }
 
+/*
+ * Below 560px the header becomes two rows: identity and run status above, the modes as a full
+ * width row beneath. The modes were previously squeezed into a scroll container with a hidden
+ * scrollbar, which made them effectively undiscoverable — navigation you have to swipe to find
+ * is navigation most people never find.
+ */
 @media (max-width: 560px) {
   .wordmark {
     display: none; /* the mark stays; the slot keeps its size */
   }
+  .header {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    padding-block: var(--space-2) var(--space-3);
+    gap: var(--space-3);
+  }
+  .nav {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+    /* a real row, not a scroll region */
+    overflow-x: visible;
+  }
   .navLink {
+    flex: 1 1 0;
     padding: var(--space-2);
+    text-align: center;
+  }
+  /* the guide line follows the padding rather than the desktop measurements */
+  .header::after {
+    left: var(--space-4);
+    right: var(--space-4);
   }
 }

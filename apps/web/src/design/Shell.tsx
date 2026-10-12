@@ -45,7 +45,7 @@ export function BrandMark({ href = '#/', mark }: { readonly href?: string; reado
 }
 
 export interface HeaderProps {
-  readonly nav?: readonly { readonly id: string; readonly label: string; readonly href: string; readonly current?: boolean }[];
+  readonly nav?: readonly { readonly id: string; readonly label: string; readonly href: string; readonly current?: boolean; readonly testId?: string }[];
   readonly end?: ReactNode;
   readonly mark?: ReactNode;
 }
@@ -57,7 +57,7 @@ export function Header({ nav = [], end, mark }: HeaderProps) {
       {nav.length > 0 && (
         <nav className={styles.nav} aria-label="Modes">
           {nav.map((item) => (
-            <a key={item.id} className={styles.navLink} href={item.href} aria-current={item.current === true ? 'page' : undefined}>
+            <a key={item.id} className={styles.navLink} href={item.href} aria-current={item.current === true ? 'page' : undefined} data-testid={item.testId}>
               {item.label}
             </a>
           ))}

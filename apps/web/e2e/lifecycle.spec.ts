@@ -43,11 +43,11 @@ test('rapid Start → Stop → Start, and Run A → select B → run B: no data 
   await page.getByTestId('restart').click();
   await page.getByTestId('run').click();
   await expect(lifecycle(page)).toHaveAttribute('data-state', 'running');
-  // Switch to B while A is streaming.
+  // Switch to B while A is streaming, through Configure, the way a user would (CP6 Gate 3:
+  // choosing an experiment and pressing Run both loads and starts it).
   await page.getByTestId('mode-configure').click();
-  await page.getByTestId('choose-raft-isolate-leader').click();
-  await page.getByTestId('load').click();
-  await page.getByTestId('run').click();
+  await page.getByLabel('Experiment').selectOption('raft-isolate-leader');
+  await page.getByTestId('run-experiment').click();
   await expect(lifecycle(page)).toHaveAttribute('data-state', 'completed');
   await expect(page.getByTestId('fingerprint')).toContainText(`${expected('raft-isolate-leader').fingerprint} ✓`);
   await expect(page.getByTestId('stats')).toContainText(`entries ${expected('raft-isolate-leader').entries}`);

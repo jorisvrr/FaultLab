@@ -2,9 +2,9 @@ import type { HTMLAttributes, ReactNode } from 'react';
 import raw from './Status.module.css';
 
 /** Typed class names: a dot-access typo is a compile error, not a silently missing class. */
-const styles = raw as Record<'chip' | 'chipGlyph' | 'neutral' | 'accent' | 'fault' | 'violation' | 'ok' | 'dot' | 'dotHollow' | 'motif' | 'motifEnd' | 'motifRing' | 'valueRow' | 'valueKey' | 'lock' | 'valueCell' | 'valueMissing' | 'facts' | 'factKey' | 'factValue' | 'empty' | 'emptyTitle' | 'emptyBody' | 'legend', string>;
+const styles = raw as Record<'chip' | 'chipGlyph' | 'neutral' | 'accent' | 'fault' | 'violation' | 'ok' | 'dot' | 'dotHollow' | 'motif' | 'motifEnd' | 'motifRing' | 'recovery' | 'valueRow' | 'valueKey' | 'lock' | 'valueCell' | 'valueMissing' | 'facts' | 'factKey' | 'factValue' | 'empty' | 'emptyTitle' | 'emptyBody' | 'legend', string>;
 
-export type Tone = 'neutral' | 'accent' | 'fault' | 'violation' | 'ok';
+export type Tone = 'neutral' | 'accent' | 'fault' | 'recovery' | 'violation' | 'ok';
 
 /**
  * Every tone carries a distinct glyph as well as a colour, so meaning never depends on hue
@@ -21,6 +21,12 @@ const GLYPH: Record<Tone, ReactNode> = {
   fault: (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
       <path d="M5 1 9 8.5H1z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  ),
+  // Restorative, so an open ring rather than the fault's solid triangle.
+  recovery: (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M8.3 5a3.3 3.3 0 1 1-1.1-2.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   ),
   violation: (

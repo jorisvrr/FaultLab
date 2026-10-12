@@ -36,8 +36,14 @@
     opacity var(--motion-base) var(--motion-ease);
 }
 
+/*
+ * `background-color`, not the `background` shorthand: the shorthand also resets background-image,
+ * and this rule out-specifies `.primary`, so hovering the CTA threw away its gradient and left
+ * near-black text on a dark surface at about 1.1:1. Variants paint with background-image; the
+ * shared hover may only touch the colour underneath.
+ */
 .button:hover:not(:disabled) {
-  background: var(--color-surface-control-hover);
+  background-color: var(--color-surface-control-hover);
   border-color: var(--color-border-strong);
 }
 
@@ -82,9 +88,15 @@
     inset 0 2px 6px 0 rgb(16 23 35 / 0.35);
 }
 
+/*
+ * Disabled, but still readable: the inherited disabled colour sat at 3.92:1 on this surface,
+ * which is below the 4.5:1 floor and all but vanished on the CTA. Disabledness is carried by the
+ * flat surface, the lost gradient and rim lights, the cursor and the disabled attribute itself —
+ * not by making the label hard to read.
+ */
 .primary:disabled {
   background: var(--color-surface-control);
-  color: var(--color-text-disabled);
+  color: var(--color-text-subtle);
   box-shadow: var(--shadow-inset-control);
   filter: none;
 }

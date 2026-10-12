@@ -98,6 +98,20 @@ npm test           # tests only
 npm run coverage   # V8 coverage report
 ```
 
+## CP6 results (Gate 3: Configure)
+
+**Tests:** 790 unit tests (+25 draft-model, +2 registry) and the full browser suite in three engines, including 12 new Configure tests per engine. Full report: [CP6_GATE3_CONFIGURE.md](CP6_GATE3_CONFIGURE.md).
+
+| Layer | What it proves | Where |
+|---|---|---|
+| Draft → effective spec | Reproduces the reference preset exactly and runs to its pinned fingerprint; canonical serialisation (same configuration ⇒ same bytes ⇒ same signature); a disabled fault plan stays in the draft and leaves the spec; the signature changes for every execution-relevant edit and for nothing else; protocol switching replaces the invariant set and raises the node minimum; stale invariant ids never reach the engine; faults naming removed nodes are dropped | `apps/web/test/configure-draft.test.ts` |
+| Fault-plan warnings | Six cases that are legal but usually mistakes (recover without crash, heal without partition, partition replacing a partition, link replacing a link in the same direction only, fault past the limit, crash without recovery) and never block a run | same |
+| Invariant descriptions | Every registered invariant has a sentence; none claims Raft does log replication or full consensus | `packages/experiments/test/registry.test.ts` |
+| Reference preset | `configure-reference` tells its documented story (four faults in order, one split-brain violation at t=477) and keeps fingerprint `6dfb02d2` | same |
+| Configure, in-browser | Real registry data; seed exactness and regeneration; protocol switching incl. a protocol with no invariants; node count driving the preview and its accessible names; disable/re-enable retaining plan and signature; fault editor add/edit/remove with the engine's partition and direction semantics; marker → editor; invalid configuration explained and unsubmittable; **the submitted spec matches field-by-field what Configure displayed**; a later UI change does not touch the running experiment | `apps/web/e2e/configure.spec.ts` |
+
+Two real bugs were found by these tests — a run that never started because `load()` is asynchronous, and the stage's stylesheet living on the prototype page — plus one found in screenshot review: input clamping that prevented the engine's validation message from ever appearing. Details in the Gate 3 report §10.
+
 ## CP6 results (Gate 2: design system)
 
 **Tests:** 762 unit tests (+6 token tests) and 102 browser tests across Chromium, Firefox and WebKit (98 passing, 4 skipped where no heap API exists). Full report: [CP6_GATE2_DESIGN_SYSTEM.md](CP6_GATE2_DESIGN_SYSTEM.md).

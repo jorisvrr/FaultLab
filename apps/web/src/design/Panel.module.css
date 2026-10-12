@@ -56,6 +56,7 @@
 }
 
 .title {
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--type-title-size);
   font-weight: 400;

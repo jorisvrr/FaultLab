@@ -41,6 +41,10 @@
   color: var(--color-state-fault);
   border-color: rgb(248 199 129 / 0.35);
 }
+.recovery {
+  color: var(--color-state-recovery);
+  border-color: rgb(173 200 254 / 0.35);
+}
 .violation {
   color: var(--color-state-violation);
   border-color: rgb(239 116 81 / 0.45);
@@ -91,6 +95,13 @@
   background: linear-gradient(180deg, rgb(196 207 217 / 0.5) 0%, rgb(139 148 158 / 0.42) 100%);
   box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.22);
 }
+/* Decoration only, so it is the first thing to go when the header needs the room. */
+@media (max-width: 560px) {
+  .motif {
+    display: none;
+  }
+}
+
 .motifRing {
   width: 6px;
   height: 6px;

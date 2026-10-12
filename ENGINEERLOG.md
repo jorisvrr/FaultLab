@@ -2317,3 +2317,158 @@ Bij 390 beeldpunten bleek de navigatie in de kop afgeknipt: "Investigate" was on
 2. Waarom overschrijft `display: flex` op een `<dialog>` het verbergen door de browser, en hoe voorkom je dat?
 3. Waarom is wachten op animaties nodig vóór je een schermafbeelding maakt, en wat had ik anders fout geconcludeerd?
 4. Waarom is "het past binnen het scherm" niet hetzelfde als "het werkt op een telefoon"?
+
+## CP6 Gate 3 — Configure
+
+### CP6.13 — Concept versus werkelijkheid: ontwerp en effectieve specificatie
+
+**1. Het centrale idee**
+Het scherm houdt twee dingen uit elkaar:
+- het **ontwerp** (draft): alles wat je hebt ingesteld, inclusief een storingsschema dat op dit moment uitstaat;
+- de **effectieve specificatie**: wat er écht naar de engine gaat.
+
+Zet je de schakelaar "storingen" uit, dan blijft het schema in het ontwerp staan — zichtbaar, maar duidelijk gemarkeerd als "bewaard, niet toegepast" — terwijl de effectieve specificatie géén storingen bevat. Zet je hem weer aan, dan staat precies hetzelfde schema er nog.
+
+**2. Waarom is dat belangrijk voor de handtekening?**
+De experimenthandtekening wordt berekend over de **effectieve** specificatie. Storingen uitzetten verandert dus de handtekening, want het verandert wat er uitgevoerd wordt — ook al is er aan het ontwerp niets weggegooid. Een test eist precies dat: elke bewerking die de uitvoering kan veranderen (zaad, aantal knopen, vertraging, limieten, invarianten, beleid, schema, protocol) verandert de handtekening, en een bewerking die de engine nooit ziet (de volgorde waarin je de storingen hebt ingetypt) verandert hem niet.
+
+**3. Canonieke volgorde**
+De specificatie wordt altijd in dezelfde sleutelvolgorde opgebouwd en de storingen worden op tijd gesorteerd. ✅ **Zonder dat zou dezelfde configuratie twee verschillende handtekeningen kunnen opleveren,** alleen omdat je de velden in een andere volgorde hebt aangeraakt.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom mag een uitgezet storingsschema niet stilletjes weggegooid worden, maar moet het wél uit de effectieve specificatie verdwijnen?
+2. Waarom verandert de handtekening dan tóch?
+3. Wat is canonieke serialisatie, en welk probleem lost het hier op?
+
+### CP6.14 — Validatie komt van de engine, niet van het formulier
+
+**1. Hoe werkt het?**
+Het formulier bouwt een specificatie en laat die door `parseSpec` en `resolveExperiment` lopen — dezelfde controles die de Worker gebruikt. Een `SpecError` draagt een **pad** mee, bijvoorbeeld `spec.limits.maxEvents`, en dat pad wijst rechtstreeks naar het veld dat de fout veroorzaakte. De tekst die je naast het veld ziet, komt dus uit de engine.
+
+⚠️ **Een fout die ik zelf maakte:** ik liet de invoervelden hun waarde afkappen (`Math.max(1, …)`). Daardoor kon je nooit een ongeldige waarde invoeren en kwam de foutmelding van de engine nooit in beeld. De test "ongeldige configuratie wordt uitgelegd" faalde, en terecht: **stilletjes herschrijven wat iemand typt is erger dan een nette foutmelding.** Het afkappen is eruit.
+
+**2. Waarschuwing is geen fout**
+Een schema dat een niet-gecrashte knoop "herstelt", of heelt terwijl er geen partitie is, is volgens de engine geldig maar bijna altijd een vergissing. Dat zijn waarschuwingen: ze blokkeren de run niet. De engine bepaalt wat mág; een ongebruikelijk plan is vaak juist het experiment.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom valideer ik via de engine in plaats van de regels in het formulier over te schrijven?
+2. Waarom is het afkappen van invoer schadelijk?
+3. Wat is het verschil tussen een fout en een waarschuwing hier?
+
+### CP6.15 — Het plan is geen simulatie
+
+**1. De regel**
+Configure toont alléén configuratie. De knopen in het midden staan allemaal op `idle` — niets heeft gedraaid, dus niets heeft een rol, en er is geen leider, bericht of schending te tonen.
+
+⚠️ **Bijna fout gegaan:** ik gaf knopen die in het plan voorkomen eerst de toestand `partitioned`, zodat ze het gestippelde amberen ringetje kregen. Dat ziet er goed uit, maar het liegt: dat ringetje betekent in dit systeem "nú afgesneden". Een plan is geen toestand. Nu krijgt zo'n knoop een **DOM-badge** met het aantal geplande storingen — duidelijk een annotatie, en voor een schermlezer leesbaar als "n2, niet gestart, 2 geplande storingen".
+
+**2. Partities eerlijk tonen**
+In de engine vervangt een partitie de vorige volledig, en is het géén schakelaar per verbinding. De editor laat daarom alle knopen in groepen zien, met een expliciete regel "iedereen anders" voor de impliciete groep. Een verbindingsstoring is bovendien **gericht**: de editor zegt erbij dat je voor de andere richting een tweede storing moet plannen.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom mag een voorbeeldweergave geen gebruikmaken van de toestandskanalen van een echte run?
+2. Wat is het verschil tussen een partitie als hergroepering en een partitie als schakelaar per verbinding?
+3. Waarom is een gerichte verbindingsstoring iets anders dan een kapotte verbinding?
+
+### CP6.16 — Twee echte fouten die de browsertests vonden
+
+- ⚠️ **De run startte niet.** Ik riep `session.load(spec, …)` aan en meteen daarna `session.run()`. Maar laden is asynchroon: er wordt een Worker gestart en pas daarna gaat de levensfase naar `ready`. `run()` daarvoor wordt genegeerd. Nu wacht het scherm op `ready` (of `error`) voordat het start. De test die de levensfase tot `completed` volgt, ving dit meteen.
+- ⚠️ **De stijl van het speelveld stond in het verkeerde bestand.** De opmaak van de 3D-knopen en hun DOM-laag zat in de stylesheet van de prototypepagina. Zodra het speelveld érgens anders werd gebruikt, hadden de knopen geen plaatsing meer en werden de bijschriften witte blokken. De stijl hoort bij het onderdeel, niet bij een pagina, en staat nu in `src/stage/stage.css`.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is laden asynchroon, en waarom mag je `run()` niet meteen erna aanroepen?
+2. Waarom hoort de stijl van een herbruikbaar onderdeel bij het onderdeel?
+
+### CP6.17 — De stilste fout: Configure draaide een ánder experiment
+
+**1. Wat er misging**
+De browsertest die een bestaand experiment via Configure start, kreeg een andere vingerafdruk terug dan de vastgelegde gouden waarde: `f4d9dce4` in plaats van `4320fef1`. Dat is geen opmaakfoutje — dat betekent dat er een ander experiment heeft gedraaid dan het scherm beweerde.
+
+De oorzaak zat in de vertaling van specificatie naar formulier. Als een specificatie géén `limits.maxEvents` noemt, vulde mijn concept daar `20_000` in. De engine zelf gebruikt als standaard `100_000`. Elk Raft-experiment laat dat veld weg, dus wie zo'n experiment opende en op Uitvoeren drukte, kreeg een run die vijf keer eerder werd afgekapt. Bij `raft-long-heartbeats` zou dat 123 932 regels tot ongeveer een zesde hebben teruggebracht.
+
+⚠️ **Bijna fout gegaan:** dezelfde vertaling gooide óók `protocol.options` weg. Het hartslagprotocol verloor daarmee stilletjes zijn interval, jitter en time-out.
+
+**2. Waarom de bestaande test dit niet zag**
+Die test controleerde of de teruggebouwde specificatie door de engine *geaccepteerd* werd. Dat is iets heel anders dan of het *hetzelfde experiment* is. Een afgekapte run is volkomen geldig; hij is alleen niet wat je hebt ingesteld.
+
+De nieuwe test vergelijkt per experiment twee dingen: de opgeloste configuratie, en de vingerafdruk van een échte run van beide specificaties. Twee gedocumenteerde standaardwaarden worden daarbij aan *beide* kanten ingevuld in plaats van genegeerd, zodat een echt verschil nog steeds faalt.
+
+**3. Wat ik eraan overhoud**
+Een standaardwaarde is onderdeel van de betekenis van een specificatie. Die mag je niet in een formulier opnieuw verzinnen: het concept haalt zijn standaard nu uit `DEFAULT_LIMITS` van de engine, zodat er één bron van waarheid is.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is "de engine accepteert het" een zwakkere eis dan "het is hetzelfde experiment"?
+2. Waarom is het gevaarlijk als een formulier zijn eigen standaardwaarden kiest?
+3. Waarom mag ik de twee standaardwaarden in de vergelijking wél gelijktrekken, en wanneer zou dat juist verkeerd zijn?
+
+### CP6.18 — Wat een schermafdruk ziet en een test niet
+
+**1. De meting versus de bewering**
+In mijn eigen documentatie stond dat de voorbeeldweergave op een telefoon een band van 280 px houdt. De schermafdruk op 390 px liet iets anders zien: minuscule bollen die over hun eigen bijschrift vielen.
+
+De ondergrens van 280 px stond op de *kolom* van het speelveld, en in die kolom zit ook het stortingsschema van 184 px. Wat overbleef voor de weergave zelf was ongeveer 94 px. Opgemeten, niet geschat. De ondergrens staat nu op het canvas; de meting zegt nu 280 px, zonder horizontale overloop.
+
+⚠️ **Bijna fout gegaan:** ik noemde eerst óók het ontbrekende woordmerk een fout. Dat is het niet — onder 560 px wordt het woordmerk bewust verborgen terwijl de merkplek zijn afmeting houdt, precies zodat het echte logo later zonder verschuiving past. Eerst de CSS lezen, dan concluderen.
+
+**2. Waarom dit geen test ving**
+De responsiviteitstest controleert dat er niets buiten beeld valt en dat alles bedienbaar blijft. Dat was allemaal waar. "Het past" en "het is bruikbaar" zijn niet hetzelfde; dat laatste moet je zien.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom vangt een test op overloop dit soort fouten niet?
+2. Waarom hoort een minimumhoogte op het canvas en niet op de kolom?
+3. Waarom is "het staat in mijn documentatie" geen bewijs?
+
+### CP6.19 — Twee dingen die niet waren wat ze leken
+
+**1. De knop die nooit uitgeschakeld was**
+In de schermafdruk van een ongeldige configuratie was "Run Experiment" vrijwel onleesbaar: donkere tekst op een donkere knop. De voor de hand liggende conclusie is "verbeter het contrast van de uitgeschakelde toestand". Die conclusie was fout, want de knop is helemáál nooit uitgeschakeld — validatie gebeurt bij het indrukken, juist zodat de fout uitgelegd kan worden.
+
+De echte oorzaak zat in het ontwerpsysteem. De gedeelde regel voor zweven gebruikte de **verkorte** eigenschap `background`, en die zet óók `background-image` terug op niets. Die regel is bovendien specifieker dan `.primary`. Gevolg: zodra de muis boven de hoofdknop hing, verdween het goedgekeurde verloop en bleef bijna-zwarte tekst op een donker vlak over, ongeveer 1,1:1. De schermafdruk liet dat zien omdat de muis na de klik nog op de knop stond.
+
+⚠️ **Bijna fout gegaan:** ik had "maak de uitgeschakelde tekst lichter" kunnen opschrijven als oplossing. Dan was de echte fout — dat elke hoofdknop zijn materiaal verliest bij zweven — blijven zitten, en had ik een toestand "gerepareerd" die niet bestaat.
+
+De regel raakt nu alleen nog `background-color`. De test vergelijkt het berekende verloop vóór en tijdens zweven en eist dat het **identiek** is; "er is een verloop" zou een ánder verloop hebben doorgelaten.
+
+**2. Navigatie die er wel was, maar niet te vinden**
+Op 390 px waren Configure, Simulate en Investigate niet zichtbaar. Ze stonden er wel: in een container met `overflow-x: auto` en een verborgen schuifbalk. Technisch bereikbaar, praktisch onvindbaar. Er bleken bovendien twee navigaties te zijn — de zichtbare, en een alleen-voor-schermlezers kopie die alleen bestond om testhaken te dragen.
+
+Nu is er één navigatie. De testhaken zitten op de echte links, wat meteen een dubbel navigatielandmerk opruimt, en onder 560 px wordt de kop twee regels: identiteit en status boven, de drie modi als volle regel eronder.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom zet `background` ook `background-image` terug, en `background-color` niet?
+2. Waarom won de zweefregel het van `.primary`?
+3. Waarom is "bereikbaar" iets anders dan "vindbaar"?
+4. Waarom is een tweede, verborgen navigatie voor een schermlezer een nadeel in plaats van een voordeel?
+
+### CP6.20 — Een vingerafdruk is een bewering
+
+**1. De regel**
+De handtekeningkaart toonde een specificatie-vingerafdruk terwijl `maxEvents` ongeldig was. Een vingerafdruk zegt: *dit is het experiment dat gaat draaien*. Bij een configuratie die de engine zou weigeren bestaat dat experiment niet, dus er valt niets waars te tonen.
+
+De kaart zegt nu "Ongeldige configuratie" (in de interface: *Invalid configuration*) zolang de effectieve specificatie niet valideert. Er wordt niets verzonnen en geen oude waarde bewaard — een stabiel ogende hash naast een foutmelding is erger dan geen hash, want het leest alsof je op Uitvoeren kunt drukken.
+
+**2. Wat ik niet veranderd heb**
+Het hashen zelf blijft deterministisch. Alleen de *beslissing om het te tonen* hangt van geldigheid af. Een test legt dat vast: dezelfde configuratie levert vóór het stukmaken en ná het repareren exact dezelfde vingerafdruk op.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is een vingerafdruk van een ongeldige configuratie misleidend in plaats van alleen nutteloos?
+2. Waarom mag ik de hashfunctie niet aanpassen om dit op te lossen?
+3. Waarom bewaar ik de laatste geldige waarde niet?
+
+### CP6.21 — Drie keer dezelfde les: kijken is ook meten
+
+Bij het maken van de definitieve schermafdrukken vond ik nog twee fouten die ik zelf had gemaakt, allebei in het werk van dezelfde middag.
+
+**1. Een klasse hergebruiken is niet gratis**
+De legenda bij de voorbeeldweergave gebruikte dezelfde klasse als het plaatje op een knoop. Die klasse is `position: absolute`, want hij hoort zich aan een knoop vast te maken. In de legenda betekende dat: het chipje ging boven op zijn eigen tekst staan. Nu delen de twee alle visuele eigenschappen en verschillen ze alleen in positionering, zodat de legenda niet kan wegdrijven van wat hij uitlegt.
+
+**2. Een aanwijzing mag niet in de weg staan**
+Het pijltje dat aangeeft dat er meer invarianten onder de vouw zitten, stond in het midden — precies op de titel van de half zichtbare kaart. Het staat nu rechts, los van de tekst, met een sterkere verloop eronder.
+
+**Wat deze twee gemeen hebben met CP6.18**
+Alle drie zijn ze door een schermafdruk gevonden, niet door een test, en alle drie waren ze "correct" volgens elke test die ik had: niets liep over, alles was bereikbaar, alle namen klopten. Een test kan controleren dat twee dingen bestaan; dat ze over elkaar heen vallen ziet alleen een oog.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom is het riskant om een klasse met `position: absolute` elders te hergebruiken?
+2. Waarom vond geen enkele test deze twee fouten?
+3. Wanneer is een schermafdruk bekijken onderdeel van verificatie, en niet alleen van oplevering?

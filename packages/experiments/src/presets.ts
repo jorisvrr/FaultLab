@@ -70,6 +70,28 @@ export const PRESETS: readonly Preset[] = Object.freeze([
     }),
   },
   {
+    id: 'configure-reference',
+    title: 'Naive leader election: crash, partition, recovery and heal',
+    summary:
+      'The reference experiment for the Configure screen, and a complete tour of the naive protocol’s weakness. n4 leads from t=63; n2 crashes at t=150; a partition isolates n4 at t=400; n3 claims leadership in epoch 2 at t=477, so two running nodes lead at once and single-leader fails; n2 recovers at t=650 and the partition heals at t=900, after which n4 is still leading epoch 1. Recorded rather than stopped, so all four scheduled faults actually run.',
+    category: 'education',
+    spec: spec({
+      seed: 2026,
+      nodes: FOUR,
+      protocol: { name: 'naive-leader', version: '1', options: {} },
+      network: { latency: { min: 1, max: 10 } },
+      limits: { maxTime: 1000, maxEvents: 20_000 },
+      faults: [
+        { at: 150, type: 'crash', node: 'n2' },
+        { at: 400, type: 'partition', groups: [['n4']] },
+        { at: 650, type: 'recover', node: 'n2' },
+        { at: 900, type: 'heal' },
+      ],
+      invariants: NAIVE,
+      invariantPolicy: 'record-and-continue',
+    }),
+  },
+  {
     id: 'naive-split-brain',
     title: 'Naive leader election: split brain after a partition',
     summary: 'n4 leads, then a partition at t=300 isolates it; n3 also claims leadership and single-leader fails (stop-on-first).',

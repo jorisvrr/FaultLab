@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { COUNTEREXAMPLES, PRESETS } from '@faultlab/experiments';
 
 export interface Expected {
   readonly id: string;
@@ -52,10 +53,30 @@ export async function runInPage(page: Page, spec: unknown, runOptions: Record<st
   );
 }
 
+/**
+ * Load a preset and stop at `ready`, without running it.
+ *
+ * It drives the Session directly rather than the Configure screen. These tests are about the
+ * runtime — lifecycle, Worker, watchdog, inspection — and Configure has its own spec
+ * (configure.spec.ts) that checks the screen submits exactly what it displays. Going through
+ * the UI here would also be impossible for the diagnostic presets, which Configure does not
+ * offer, and would couple every runtime test to a dashboard's markup.
+ */
 export async function openPreset(page: Page, id: string) {
-  await page.goto('/#/configure');
-  await page.getByTestId(`choose-${id}`).click();
-  await page.getByTestId('load').click();
+  // Counterexamples are registered separately from the presets and are addressed by the same id.
+  const preset = PRESETS.find((p) => p.id === id) ?? COUNTEREXAMPLES.find((p) => p.id === id);
+  if (preset === undefined) throw new Error(`no preset ${id}`);
+  // Simulate renders the docked playback bar, so the lifecycle badge and controls are present.
+  await page.goto('/#/simulate');
+  await page.waitForFunction(() => 'faultlab' in globalThis);
+  await page.evaluate(
+    ({ spec, meta }) => (globalThis as unknown as { faultlab: { session: { load: (s: unknown, m: unknown) => void } } }).faultlab.session.load(spec, meta),
+    {
+      spec: preset.spec as unknown,
+      // A counterexample preset carries no summary or category of its own.
+      meta: { id: preset.id, title: preset.title, summary: 'summary' in preset ? preset.summary : '', category: 'category' in preset ? preset.category : 'counterexample' },
+    },
+  );
   await expect(page.getByTestId('lifecycle')).toHaveAttribute('data-state', 'ready');
 }
 

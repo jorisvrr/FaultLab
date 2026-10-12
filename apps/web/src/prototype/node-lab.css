@@ -22,16 +22,6 @@ body {
   position: fixed;
   inset: 0;
 }
-.lab__panel {
-  position: absolute;
-  border-radius: 15px;
-  border: 1px solid #2c2b2a;
-  box-sizing: border-box;
-}
-.stage {
-  position: absolute;
-  inset: 0;
-}
 .lab__links {
   position: absolute;
   inset: 0;
@@ -44,52 +34,11 @@ body {
   stroke-linecap: round;
   filter: drop-shadow(0 0 3px rgb(194 209 227 / 0.55));
 }
-.stage-canvas,
-.stage-flat {
-  position: absolute !important;
-  inset: 0;
-}
-.stage-overlay {
+.lab__panel {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.stage-node {
-  position: absolute;
-  border: 0;
-  padding: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  pointer-events: auto;
-  display: grid;
-  place-items: center;
-}
-/* Keyboard focus: a crisp blue ring outside the selection ring (DOM, every tier). */
-.stage-node:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 0.5em;
-}
-.stage-node:focus:not(:focus-visible) {
-  outline: none;
-}
-.stage-node__label {
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  pointer-events: none;
-  text-shadow: 0 0 6px rgb(0 0 0 / 0.6);
-}
-.stage-node__label--below {
-  position: absolute;
-  top: calc(100% + 12px);
-}
-.stage-node__crown {
-  display: block;
-  color: var(--amber);
-  font-size: 0.55em;
-  line-height: 1;
-  text-align: center;
+  border-radius: 15px;
+  border: 1px solid #2c2b2a;
+  box-sizing: border-box;
 }
 .lab__caption {
   position: absolute;

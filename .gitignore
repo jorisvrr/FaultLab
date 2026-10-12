@@ -38,3 +38,6 @@ playwright-report/
 # Measurement scripts' bundles and profiles (tools/perf)
 tools/perf/.out/
 tools/perf/.prof/
+
+# Personal working notes, kept out of the repository (the file itself is never modified)
+/faultlab.md

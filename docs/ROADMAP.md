@@ -109,7 +109,8 @@ Driven by three approved designs and the UI specification ([FAULTLAB_UI_IMPLEMEN
 | 0 | Design audit, tokens, inventories, open questions, WebKit investigation ([CP6_DESIGN_AUDIT.md](CP6_DESIGN_AUDIT.md)) | Done, approved |
 | 1 | The two CP5 regressions fixed; the sculptural node prototype ([CP6_GATE1_NODE.md](CP6_GATE1_NODE.md)) | Approved, committed |
 | 2 | Design system and component gallery ([plan](CP6_GATE2_PLAN.md), [report](CP6_GATE2_DESIGN_SYSTEM.md)) | Done, awaiting review |
-| 3–5 | Configure, Simulate, Investigate at full fidelity | |
+| 3 | Configure at full fidelity ([plan](CP6_GATE3_PLAN.md), [report](CP6_GATE3_CONFIGURE.md)) | Done, awaiting review |
+| 4–5 | Simulate, Investigate at full fidelity | |
 | 6 | Supporting pages, motion, polish | |
 | Final | Accessibility, responsiveness, performance, visual regression, retire the CP2.5 demo | |
 

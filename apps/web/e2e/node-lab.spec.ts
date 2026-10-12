@@ -34,14 +34,19 @@ test('one WebGL context, two draw calls, the 3D chunk only where a stage is show
   const errors = watchErrors(page);
   const chunks: string[] = [];
   page.on('request', (r) => r.url().includes('NodeCanvas') && chunks.push(r.url()));
-  // The application itself does not load three.js (Gate 1 adds no stage to it).
-  await page.goto('/');
+  // Simulate keeps its CP5 presentation and shows no stage, so it must not pay for three.js.
+  // (Before Gate 3 no screen had a stage at all; Configure's topology preview is the first.)
+  await page.goto('/#/simulate');
   await expect(page.getByTestId('playback')).toBeVisible();
-  expect(chunks, 'the application does not download the 3D chunk').toEqual([]);
+  expect(chunks, 'a screen with no stage does not download the 3D chunk').toEqual([]);
+
+  // Configure does show a stage, so the chunk arrives there — lazily, and only then.
+  await page.goto('/#/configure');
+  await page.getByTestId('configure').waitFor();
+  await expect.poll(() => chunks.length, { message: 'Configure loads the 3D chunk lazily' }).toBe(1);
 
   await page.goto('/node-lab.html?scene=states-warm');
   await rendered(page);
-  expect(chunks.length, 'the prototype loads the 3D chunk lazily').toBe(1);
   expect(await page.locator('canvas').count()).toBe(1);
   for (const scene of ['investigate-ref', 'simulate-ref', 'scale-20']) {
     await lab(page, `lab.setScene('${scene}')`);
