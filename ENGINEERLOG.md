@@ -2472,3 +2472,70 @@ Alle drie zijn ze door een schermafdruk gevonden, niet door een test, en alle dr
 1. Waarom is het riskant om een klasse met `position: absolute` elders te hergebruiken?
 2. Waarom vond geen enkele test deze twee fouten?
 3. Wanneer is een schermafdruk bekijken onderdeel van verificatie, en niet alleen van oplevering?
+
+## CP6 Gate 3 — Afgerond en gepubliceerd
+
+### CP6.22 — De eerste publicatie: wat een push eigenlijk doet
+
+**1. Eindverificatie**
+Voor de commit draaide alles nog één keer op de definitieve code: 796 eenheidstests, 155 browsertests in Chromium, Firefox en WebKit, 4 overgeslagen, 0 fouten, typecontroles schoon en beide productiebouwsels geslaagd. De twee laatste correcties (de legenda en het pijltje) zaten aantoonbaar in dat bouwsel — eerst in de broncode gecontroleerd, daarna getest.
+
+Commit `a613872`, gepubliceerd op `https://github.com/jorisvrr/FaultLab.git`.
+
+**2. Wat `git push -u origin main` betekent**
+- `origin` is een **naam voor een adres**. `git remote add origin <url>` legt alleen die koppeling vast; er gaat nog niets over de lijn.
+- `push` stuurt **commits** (objecten), niet "bestanden". Git stuurt wat de ontvanger nog niet heeft.
+- `main` is de lokale tak die ik publiceer.
+- `-u` (van *upstream*) onthoudt dat mijn lokale `main` hoort bij `origin/main`. Daarna weet `git status` of ik voor- of achterloop, en kan ik `git push` en `git pull` zonder argumenten gebruiken. `origin/main` is mijn **laatst bekende** beeld van de server, geen live waarheid: die wordt pas bijgewerkt bij `fetch`, `pull` of `push`.
+
+**3. Waarom .gitignore niets verwijdert wat al in de geschiedenis staat**
+`.gitignore` werkt alleen op bestanden die Git nog niet volgt. Het is een regel voor "wat mag erbij komen", geen gum.
+
+Stond een bestand ooit in een commit, dan blijft het in die commit zitten — ook als je het later verwijdert. Een commit is onveranderlijk; "verwijderen" is een nieuwe commit die zegt dat het weg is. Iedereen die de geschiedenis kloont, krijgt die oude commit mét inhoud mee. Een gelekte sleutel is dus gelekt vanaf het moment van de commit, niet pas bij de publicatie, en het terugdraaien daarvan vereist het **herschrijven** van de geschiedenis (alle hashes veranderen).
+
+Daarom staat `/faultlab.md` in `.gitignore` *voordat* er ooit iets mee gebeurde. Gecontroleerd: `git check-ignore` herkent de regel, het bestand ontbreekt in `git status`, en een proefdraai van `git add -A` zou het niet klaarzetten.
+
+**4. Waarom je de hele geschiedenis scant en niet alleen de huidige bestanden**
+Precies om reden 3. Kijken naar wat er nú staat is niet genoeg: een sleutel kan in commit 3 zijn toegevoegd en in commit 5 zijn weggehaald, en dan staat hij nergens in de werkmap maar wél in de geschiedenis die je publiceert.
+
+Wat ik daarom heb gecontroleerd vóór de eerste push:
+- alle 292 paden die ooit zijn toegevoegd (precies gelijk aan de 292 die er nu zijn — er is dus nooit iets toegevoegd en later verwijderd);
+- alle 459 blobs (bestandsversies) in de bereikbare geschiedenis op sleutelpatronen: 0 treffers;
+- absolute paden naar mijn eigen machine: geen;
+- per ongeluk meegecommitte afbeeldingen of datasets: geen enkele binaire asset, ooit;
+- de grootste objecten: enkel tekstversies van ENGINEERLOG.md.
+
+**5. Wat er openbaar wordt naast code**
+Elke commit draagt naam, e-mailadres en een tijdstempel mét tijdzone. Dat is mijn eigen identiteit en dat is de bedoeling bij een portfolioproject, maar het is goed om te weten dát het meegaat: `+0200` verraadt in welke tijdzone ik werk.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Wat doet `-u` bij een push, en wat is het verschil tussen `main` en `origin/main`?
+2. Waarom haalt `.gitignore` een al vastgelegd bestand niet uit de geschiedenis?
+3. Waarom is "het staat niet meer in de werkmap" geen bewijs dat iets niet gepubliceerd wordt?
+4. Waarom verandert het herschrijven van geschiedenis alle commit-hashes?
+
+### CP6.23 — Publiceren is iets anders dan bouwen
+
+**1. De fout**
+De eerste poging om op Vercel te publiceren mislukte, maar *niet* in de bouwstap: die slaagde. De fout kwam daarna:
+
+> No Output Directory named "public" found after the Build completed.
+
+Vercel herkent dit project niet als een bekend raamwerk, en zoekt dan standaard naar een map `public`. Dit is een monorepo waarin de applicatie naar `apps/web/dist` bouwt. Niemand had Vercel verteld waar hij moest kijken.
+
+In `vercel.json` staat nu het bouwcommando, de uitvoermap en `npm ci`. Dat laatste is bewust: `npm install` mág versies opnieuw oplossen, `npm ci` installeert exact wat in `package-lock.json` staat. Op een buildserver wil je reproduceerbaarheid, niet "de nieuwste die nog past".
+
+⚠️ **Les:** een geslaagde lokale bouw bewijst niets over een publicatie. Bouwen en uitserveren zijn twee verschillende stappen, en de tweede heeft zijn eigen aannames.
+
+**2. Interne pagina's horen niet in productie**
+De applicatie heeft vier ingangen: `index.html` (de echte app), plus `design.html` (de componentengalerij), `node-lab.html` (het prototype van de 3D-knopen) en `bench.html` (de meetbank). Die laatste drie zijn gereedschap, geen productpagina's — maar de browsertests hebben ze wél nodig.
+
+Oplossing: één extra bouwmodus. `vite build --mode public` neemt alleen `index.html` mee; de standaardbouw houdt alle vier. Zo verdwijnen de interne pagina's uit productie **en** hun code-brokken, terwijl de tests ongewijzigd blijven. De bestanden zelf zijn niet verwijderd — dat zou het gereedschap slopen om een publicatieprobleem op te lossen.
+
+Gecontroleerd: de publieke bouw levert alleen `index.html`, geen `nodeLab`/`design`/`bench`-brokken, en wél de Worker, de lettertypes en de lui geladen 3D-module. Bij het uitserveren van die bouw geven `/design.html` en de rest de gewone applicatie terug (terugvalgedrag), niet de galerij.
+
+**Dit moet ik zelf kunnen uitleggen**
+1. Waarom slaagt een bouw wel en mislukt een publicatie toch?
+2. Wat is het verschil tussen `npm install` en `npm ci`, en waarom kies je op een server het laatste?
+3. Waarom verwijder ik de interne pagina's niet gewoon?
+4. Wat bedoel ik met een "code-brok" (chunk), en waarom scheelt het dat die niet meegaat?
